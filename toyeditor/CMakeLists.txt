@@ -9,4 +9,8 @@ message(STATUS "Found version of ncurses: ${CURSES_LIBRARY}")
 
 add_executable(te editor.c)
 target_include_directories(te PRIVATE "${CURSES_INCLUDE_DIR}")
+target_include_directories(te PRIVATE "${CMAKE_SOURCE_DIR}/codebuffer")
+target_include_directories(te PRIVATE "${CMAKE_SOURCE_DIR}/toyparser")
 target_link_libraries(te ${CURSES_LIBRARY})
+target_link_libraries(te code_buffer)
+target_link_libraries(te highlighter)

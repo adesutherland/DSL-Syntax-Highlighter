@@ -1,0 +1,10 @@
+# This is a comment
+int x = 5;
+# This is another comment
+int y;
+
+y = x + 10;
+
+say "The value of y is:";
+say x;
+say y;
