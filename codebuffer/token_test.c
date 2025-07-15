@@ -1,6 +1,6 @@
 
 
-#include "token_buffer.h"
+#include "dslsyntax_common.h"
 
 int main() {
     CB_ParseTree *tb;

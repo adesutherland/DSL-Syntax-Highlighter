@@ -1,5 +1,10 @@
-/* token_buffer.h */
-
+//
+// DSL Syntax Common Header
+// This header file defines common structures and functions used by both the
+// DSL syntax parser and editor. It includes definitions for code buffers, initial loads,
+// transactions, and other shared components that facilitate communication between
+// the editor and parser components of the DSL editor library.
+//
 #ifndef TOKEN_BUFFER_H
 #define TOKEN_BUFFER_H
 
@@ -347,32 +352,13 @@ void apply_parse_result(CodeBuffer *cb, ParseResult *parse_result);
 /* Function to get a delta from the code buffer */
 Delta* get_delta(CodeBuffer *cb);
 
-/* Function to create an initial load from a source string */
-InitialLoad* create_initial_load(const char *unique_document_id, const char *content);
+
 
 /* Inproc communications functions factory */
 CommunicationFunctions* create_inproc_communication_functions(CodeBuffer *parser_cb);
 
-/* Function Prototypes - Used by Editor */
-
-/* Function to initialise the editor side of the library */
-void editor_init();
-
-/* Function to free the editor side of the library */
-void editor_free();
-
-/*
- * Load the Initial Content
- * This function sets the local CodeBuffer object, after which the codeblock
- * can be used by the editor.
- * It frees the initial load after setting the code buffer.
- * It calls the communication function to send the initial load to the parser
- * The results of which will be applied to the code buffer when it arrives.
- */
-void load_initial_content(CodeBuffer *cb, InitialLoad *initial_load);
-
-// Highlights the buffer using its parse tree
-void highlight_syntax(CodeBuffer *buffer);
+// Free the inproc communication functions
+void free_inproc_communication_functions(CommunicationFunctions *comm);
 
 /* Function Prototypes - Utility / Common Functions */
 
@@ -411,9 +397,6 @@ char32_t* utf8_to_utf32(const char *utf8, size_t *length);
  * length is set to the length of the returned utf32 string
  * Newline is not included in the output */
 char32_t* first_line_utf8_to_utf32(const char *utf8, size_t *length);
-
-/* Common helper function to do a deep copy of an InitialLoad */
-InitialLoad* copy_initial_load(InitialLoad *initial_load);
 
 /* Function to create a new CodeBuffer */
 CodeBuffer* create_code_buffer(CommunicationFunctions *comm, ParserFunction parser_function);
@@ -576,5 +559,19 @@ void cb_validate_tree(CB_ParseTree *tb);
 
 /* Function to convert CB_NodeType to a string */
 const char* cb_token_type_to_string(CB_NodeType type);
+
+
+/*TODO - This is where I am adding functions i have moved to common */
+
+/* Utility to convert transaction code to text */
+const char* transaction_type_to_string(TransactionType type);
+
+/*
+ * Base functionality to Load the Initial Content
+ * This function sets the local CodeBuffer object, after which the codeblock
+ * can be used.
+ * It frees the initial load after setting the code buffer.
+ */
+void base_load_initial_content(CodeBuffer *cb, InitialLoad *initial_load);
 
 #endif /* TOKEN_BUFFER_H */

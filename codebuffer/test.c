@@ -2,7 +2,8 @@
 
 #include <unistd.h> // For sleep function
 
-#include "token_buffer.h"
+#include "dslsyntax_common.h"
+#include "dslsyntax_editor.h" // Editor library header
 #include "parser_highlighter.h" // Toy parser highlighter header
 
 // Function to print the code buffer with the attributes colourised using ansi escape codes
@@ -21,6 +22,8 @@ int main() {
 
     // Create parser CodeBuffer
     parser_cb = create_code_buffer(0, toy_parser);
+//    parser_cb = create_code_buffer(0, 0);
+
 
     // Create communication functions
     CommunicationFunctions *comm = create_inproc_communication_functions(parser_cb);
@@ -31,7 +34,7 @@ int main() {
 
     // Loop this section 100 times to simulate a long-running editor
     // And try to detect race conditions
-    for (int i = 0; i < 100; i++) {
+    for (int i = 0; i < 1; i++) {
         // Simulate some work in the editor
         usleep(500000); // Sleep for 100 milliseconds
 
@@ -43,7 +46,7 @@ int main() {
         usleep(500000); // Sleep for 100 milliseconds
 
 
-        // Enter critical section to ensure thread safety
+        // Enter a critical section to ensure thread safety
         int rc = enter_codeblock_critical_section();
         if (rc != 0) {
             fprintf(stderr, "Failed to enter critical section: %d\n", rc);
@@ -55,7 +58,7 @@ int main() {
         print_code_buffer_with_attributes(editor_cb);
         printf("\n");
 
-        // leaave critical section
+        // leave the critical section
         rc = exit_codeblock_critical_section();
         if (rc != 0) {
             fprintf(stderr, "Failed to exit critical section: %d\n", rc);
@@ -81,25 +84,13 @@ int main() {
         print_code_buffer_with_attributes(editor_cb);
         printf("\n");
 
-        // leave critical section
+        // leave the critical section
         rc = exit_codeblock_critical_section();
         if (rc != 0) {
             fprintf(stderr, "Failed to exit critical section: %d\n", rc);
             return 1;
         }
     }
-
-    /* Free the CodeBuffer */
-    free_code_buffer(editor_cb);
-
-    /* Free the parser CodeBuffer */
-    free_code_buffer(parser_cb);
-
-    /* Free the editor library */
-    editor_free();
-
-
-return 0;
 
     /* Perform a transaction: Add a new line */
     txn1.type = TRANSACTION_ADDLINE;
@@ -132,13 +123,14 @@ return 0;
         printf("Change Version: %d\n", (int)delta->change_version);
         printf("Unique Document ID: %s\n", delta->unique_document_id);
         for (size_t i = 0; i < delta->transaction_count; i++) {
+            const char* trans = transaction_type_to_string(delta->transactions[i].type);
             if (delta->transactions[i].content) {
-                printf("Transaction %zu: Type %d, Line %d, Col %d, Content '%s'\n",
-                       i, delta->transactions[i].type, delta->transactions[i].pos_line,
+                printf("Transaction %zu: Type %s, Line %d, Col %d, Content '%s'\n",
+                       i, trans, delta->transactions[i].pos_line,
                        delta->transactions[i].pos_col, delta->transactions[i].content);
             } else {
-                printf("Transaction %zu: Type %d, Line %d, Col %d\n",
-                       i, delta->transactions[i].type, delta->transactions[i].pos_line,
+                printf("Transaction %zu: Type %s, Line %d, Col %d\n",
+                       i, trans, delta->transactions[i].pos_line,
                        delta->transactions[i].pos_col);
             }
         }
@@ -150,26 +142,6 @@ return 0;
     print_code_buffer_with_attributes(editor_cb);
     printf("\n");
 
-    /* Print initial parser buffer */
-    printf("Initial Parser Buffer:\n");
-    print_code_buffer_with_attributes(parser_cb);
-    printf("\n");
-
-    /* Replay the delta to the parser */
-    replay_delta(parser_cb, delta);
-
-    /* Print buffer after replaying delta */
-    printf("Parser Buffer after replaying delta:\n");
-    print_code_buffer_with_attributes(parser_cb);
-    printf("\n");
-
-    // Example Toy Parser
-    toy_parser(parser_cb);
-
-    // Print the editor CodeBuffer with syntax highlighting
-    printf("Editor CodeBuffer with Syntax Highlighting:\n");
-    print_code_buffer_with_attributes(editor_cb);
-
     /* Free the delta */
     free_delta(delta);
 
@@ -178,6 +150,9 @@ return 0;
 
     /* Free the parser CodeBuffer */
     free_code_buffer(parser_cb);
+
+    /* Free the communication functions */
+    free_inproc_communication_functions(comm);
 
     /* Free the editor library */
     editor_free();

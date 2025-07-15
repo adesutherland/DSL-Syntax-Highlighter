@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include "parser_highlighter.h"
-#include "token_buffer.h"
+#include "dslsyntax_common.h"
 
 int main(int argc, char *argv[]) {
 

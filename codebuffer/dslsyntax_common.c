@@ -1,7 +1,7 @@
 /* token_buffer.c */
 
 #include <ctype.h>
-#include "token_buffer.h"
+#include "dslsyntax_common.h"
 
 /* Initialization & Cleanup */
 
@@ -1171,11 +1171,10 @@ void highlight_syntax(CodeBuffer *buffer) {
     CodeBufferCharAttributes **old_attributes = buffer->attributes;
     buffer->attributes = NULL;
 
-    // Safe Reallocate attribute to ensure the attributes are the same size as the lines
-    // Note that safe_realloc does malloc (and zeros the values) as the existing pointers are NULL
-    buffer->attributes = (CodeBufferCharAttributes**)safe_realloc(buffer->attributes, sizeof(CodeBufferCharAttributes*) * buffer->line_count);
+    // Malloc new attributes
+    buffer->attributes = (CodeBufferCharAttributes**)malloc(sizeof(CodeBufferCharAttributes*) * buffer->line_count);
     for (int i = 0; i < buffer->line_count; i++) {
-        buffer->attributes[i] = (CodeBufferCharAttributes*)safe_realloc(buffer->attributes[i], sizeof(CodeBufferCharAttributes) * buffer->line_lengths[i]);
+        buffer->attributes[i] = (CodeBufferCharAttributes*)malloc(sizeof(CodeBufferCharAttributes) * (buffer->line_lengths[i] + 1));
         // Initialize the attributes to default values
         for (int j = 0; j < buffer->line_lengths[i]; j++) {
             buffer->attributes[i][j].token_type = 0; // Blank
@@ -1183,6 +1182,11 @@ void highlight_syntax(CodeBuffer *buffer) {
             buffer->attributes[i][j].subtree_type = 0; // Blank
             buffer->attributes[i][j].subtree_lines = 0; // Ignored as subtree_type is 0
         }
+        // Set the last attribute (line break to whitespace
+        buffer->attributes[i][buffer->line_lengths[i]].token_type = LEXER_WHITESPACE; // The last character is a whitespace
+        buffer->attributes[i][buffer->line_lengths[i]].severity = CB_NONE; // The last character is a whitespace
+        buffer->attributes[i][buffer->line_lengths[i]].subtree_type = 0; // The last character is a whitespace
+        buffer->attributes[i][buffer->line_lengths[i]].subtree_lines = 0; // The last character is a whitespace
     }
 
     // If node_lines is null, allocate the buffer using safe_realloc which uses malloc and zeros the values
@@ -1220,9 +1224,101 @@ void highlight_syntax(CodeBuffer *buffer) {
         }
 
         // Free the old attributes
+        // todo what happens if the number of lines changes?
         for (int i = 0; i < buffer->line_count; i++) {
             free(old_attributes[i]);
         }
         free(old_attributes);
+    }
+}
+
+/*
+ * Base functionality to Load the Initial Content
+ * This function sets the local CodeBuffer object, after which the codeblock
+ * can be used.
+ * It frees the initial load after setting the code buffer.
+ */
+void base_load_initial_content(CodeBuffer *cb, InitialLoad *initial_load) {
+
+    /* Set the CodeBuffer with the initial content */
+    /* Set unique_document_id */
+    cb->unique_document_id = initial_load->unique_document_id;
+
+    /* Set the lines */
+    cb->lines = initial_load->lines;
+    cb->line_count = initial_load->line_count;
+    cb->line_lengths = initial_load->line_lengths;
+
+    /* Initialize other fields */
+    cb->snapshot_number = 0;
+    cb->highest_severity = CB_NONE;
+    cb->dirty_lines = (char *)malloc(sizeof(char) * cb->line_count);
+    if (!cb->dirty_lines) {
+        perror("Failed to allocate memory for dirty_lines");
+        exit(EXIT_FAILURE);
+    }
+    for (size_t i = 0; i < cb->line_count; i++) {
+        cb->dirty_lines[i] = 0;
+    }
+    cb->parse_tree = NULL;
+    cb->node_lines = NULL;
+    cb->attributes = NULL;
+    cb->transactions = NULL;
+    cb->transaction_count = 0;
+
+    /* Free the initial load */
+    free(initial_load);
+
+    /* Set the snapshot of the content */
+    snapshot(cb);
+
+    if (cb->parser_function) {
+        /* Call the parser function to create the initial parse tree
+         * This could be an editor "emergency parser" or a more complex parser at the
+         * parser / server end
+         */
+        cb->parser_function(cb);
+    }
+    else {
+        /* We need to create the initial emergency parse tree /
+         * using the most basic approach */
+        cb->parse_tree = cb_create_token_buffer();
+        /* Create the root node */
+        CB_Node root = cb_create_node(PARSE_TREE_FILE, 0, 0);
+        cb_set_current_parent_to_root_node(cb->parse_tree);
+
+        /* We populate it with a LEXER_TOKEN for each line */
+        size_t total_length = 0;
+        for (size_t i = 0; i < cb->line_count; i++) {
+            /* Get the line length */
+            size_t len = cb->line_lengths[i];
+            total_length += len + 1; // Include the virtual newline character
+            CB_Node node = cb_create_node(LEXER_TOKEN, i, len);
+            cb_add_child_node(cb->parse_tree, node);
+        }
+        root.length = total_length;
+
+        /* `Set up blank node_lines */
+        cb->node_lines = (CB_Node***) malloc(sizeof(CB_Node**) * cb->line_count);
+        if (!cb->node_lines) {
+            perror("Failed to allocate memory for node_lines");
+            exit(EXIT_FAILURE);
+        }
+        for (size_t i = 0; i < cb->line_count; i++) {
+            cb->node_lines[i] = (CB_Node**)malloc(sizeof(CB_Node*) * (cb->line_lengths[i] + 1));
+        }
+    }
+}
+
+/* Utility to convert transaction code to text */
+const char* transaction_type_to_string(TransactionType type) {
+    switch (type) {
+        case TRANSACTION_ADDLINE: return "ADDLINE";
+        case TRANSACTION_DELETELINE: return "DELETELINE";
+        case TRANSACTION_ADDCHARS: return "ADDCHARS";
+        case TRANSACTION_DELETECHARS: return "DELETECHARS";
+        case TRANSACTION_JOINLINES: return "JOINLINES";
+        case TRANSACTION_SPLITLINE: return "SPLITLINE";
+        default: return "INVALID";
     }
 }

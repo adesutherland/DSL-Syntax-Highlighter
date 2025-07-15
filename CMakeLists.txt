@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.29)
 project(DSL_Syntax_Highlighter)
-
+#set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=memory -fPIE -pie -fno-omit-frame-pointer -g -fno-optimize-sibling-calls -O1")
 add_subdirectory(toyeditor)
 add_subdirectory(toyparser)
 add_subdirectory(codebuffer)

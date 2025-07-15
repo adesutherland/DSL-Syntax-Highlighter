@@ -4,7 +4,7 @@
 #define PARSER_H
 
 #include "ast.h"
-#include "token_buffer.h"
+#include "dslsyntax_common.h"
 
 // The actual toy parser function
 void toy_parser(CodeBuffer *codeBuffer);

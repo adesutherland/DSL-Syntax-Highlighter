@@ -51,7 +51,7 @@ int init_parser_thread_utils(void) {
 #endif
     parser_thread_initialized = 1;
     parsing_thread_active = 0; // No parsing thread is active initially
-    thread_id = NULL; // Initialize thread ID to NULL
+    thread_id = 0; // Initialize thread ID to NULL
 
     // Initialize the parse complete event
     parse_complete_event.initialized = 0;
@@ -235,6 +235,7 @@ static void* parser_thread_wrapper(void *arg_wrapper_pv) {
     ThreadWrapperArgs *wrapper_args = (ThreadWrapperArgs *)arg_wrapper_pv;
     ThreadFunctionType user_routine = wrapper_args->user_routine;
     void *user_arg = wrapper_args->user_arg;
+    free(wrapper_args); // Free the dynamically allocated wrapper arguments
 
 #ifdef _WIN32
     DWORD result = user_routine(user_arg); // Call the user's actual thread function
@@ -253,8 +254,6 @@ static void* parser_thread_wrapper(void *arg_wrapper_pv) {
         fprintf(stderr, "parser_thread_wrapper: Failed to enter critical section to reset parsing_thread_active. Flag may be incorrect.\n");
         // This is a more serious issue, as the flag will remain true.
     }
-
-    free(wrapper_args); // Free the dynamically allocated wrapper arguments
 
 #ifdef _WIN32
     return result;

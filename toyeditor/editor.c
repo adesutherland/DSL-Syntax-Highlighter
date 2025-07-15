@@ -16,7 +16,7 @@ typedef DWORD (WINAPI *ThreadFunctionType)(LPVOID lpThreadParameter);
 #include <unistd.h>
 #endif
 
-#include "token_buffer.h"
+#include "dslsyntax_common.h"
 
 #define CTRL_KEY(k) ((k) & 0x1f)
 #define MAX_LINES 1000

@@ -3,7 +3,8 @@
 // Comms functions
 //
 
-#include "token_buffer.h"
+#include "dslsyntax_common.h"
+#include "dslsyntax_parser.h"
 
 // Inproc Comms
 
@@ -20,11 +21,14 @@ static CB_ParseTree * inproc_send_initial_load(CommunicationFunctions *comm_bloc
 
     // In a real implementation, this would send the initial load to the parser
     printf("Sending initial load to parser: %s\n", initial_load->unique_document_id);
+
     // Get the comms data
     InprocCommsData *comms_data = (InprocCommsData *)comm_block->comms_data;
-    load_initial_content(comms_data->parser_code_buffer, initial_load); // Note this frees the initial_load_copy
+
+    parser_load_initial_content(comms_data->parser_code_buffer, initial_load); // Note this frees the initial_load_copy
     CB_ParseTree *result = comms_data->parser_code_buffer->parse_tree;
     comms_data->parser_code_buffer->parse_tree = NULL; // Disconnect the parser tree from the code buffer
+
     return result;
 }
 
@@ -80,6 +84,7 @@ void free_inproc_communication_functions(CommunicationFunctions *comm) {
     InprocCommsData *comms_data = (InprocCommsData *)comm->comms_data;
     if (comms_data != NULL) {
         free(comms_data);
+        comm->comms_data = NULL; // Set to NULL to avoid dangling pointer
     }
 
     // Free the communication functions

@@ -120,7 +120,7 @@ ParserToken* lexer_number(Lexer *lexer) {
     char *number_str = strndup(lexer->text + start_pos, length);
 
     ParserToken* token = add_token(PARSER_TOKEN_NUMBER, 1, number_str, start_pos, length, start_line, start_column, lexer->line, lexer->column);
-
+    free(number_str); // Free the number string after adding the token
     return token;
 }
 
@@ -143,6 +143,7 @@ ParserToken *lexer_identifier(Lexer *lexer) {
     }
 
     ParserToken* token = add_token(type, 1, id_str, start_pos, length, start_line, start_column, lexer->line, lexer->column);
+    free(id_str); // Free the identifier string after adding the token
     return token;
 }
 
@@ -162,6 +163,7 @@ ParserToken *lexer_string(Lexer *lexer) {
 
         ParserToken *token;
         token = add_token(PARSER_TOKEN_STRING, 1, string_str, start_pos, length, start_line, start_column, lexer->line, lexer->column);
+        free(string_str); // Free the string after adding the token
         return token;
     } else {
         // Unterminated string
@@ -364,7 +366,7 @@ ASTNode *parse_statement(Lexer *lexer) {
             panic_mode(lexer);
             return node;
         }
-        char *var_name = strdup(current_token_global->value);
+        char *var_name = current_token_global->value;
         ParserToken *var_name_token = current_token_global;
         eat(lexer, PARSER_TOKEN_IDENTIFIER);
 
@@ -390,7 +392,8 @@ ASTNode *parse_statement(Lexer *lexer) {
 
     } else if (current_token_global->type == PARSER_TOKEN_IDENTIFIER) {
         // Assignment
-        char *var_name = strdup(current_token_global->value);
+        // char *var_name = strdup(current_token_global->value);
+        char *var_name = current_token_global->value;
         ParserToken *var_name_token = current_token_global;
         eat(lexer, PARSER_TOKEN_IDENTIFIER);
 
