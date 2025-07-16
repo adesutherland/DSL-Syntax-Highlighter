@@ -325,22 +325,18 @@ typedef struct ParseResult {
 typedef CB_ParseTree* (*SendInitialLoad)(CommunicationFunctions *comm_block, InitialLoad *initial_load);
 
 /* Function to send a delta to the parser */
-typedef void (*SendDelta)(CommunicationFunctions *comm_block, Delta *delta);
-
-/* Function to send a parse result to the editor */
-typedef void (*SendParseResult)(CommunicationFunctions *comm_block, ParseResult *parse_result);
+typedef CB_ParseTree* (*SendDelta)(CommunicationFunctions *comm_block, Delta *delta);
 
 /* Communication Function Pointer Structure */
 struct CommunicationFunctions {
     SendInitialLoad send_initial_load;
     SendDelta send_delta;
-    SendParseResult send_parse_result;
     void* comms_data; // Pointer to data for the communication functions
 };
 
 /* Library sync functions - these are called by the communication functions */
 /* Function to apply a delta to the code buffer */
-void replay_delta(CodeBuffer *cb, Delta *delta);
+void base_replay_delta(CodeBuffer *cb, Delta *delta);
 
 /* Function to apply the initial load to the code buffer */
 /* The initial load is freed after applying */
@@ -402,7 +398,7 @@ char32_t* first_line_utf8_to_utf32(const char *utf8, size_t *length);
 CodeBuffer* create_code_buffer(CommunicationFunctions *comm, ParserFunction parser_function);
 
 /* Applying Transactions */
-void apply_transaction(CodeBuffer *cb, Transaction transaction);
+void editor_apply_transaction(CodeBuffer *cb, Transaction transaction);
 
 /* Function to take a snapshot of the buffer */
 void snapshot(CodeBuffer *cb);
@@ -434,6 +430,8 @@ size_t get_code_buffer_length(CodeBuffer *cb);
 /* FUNCTIONS FOR THE PARSER TO USE */
 
 CB_ParseTree* cb_create_token_buffer();
+
+// Function to free the CB_ParseTree and its nodes
 void cb_free_token_buffer(CB_ParseTree *root);
 
 // Function to extract the source code from the CodeBuffer in UTF-8 format
@@ -573,5 +571,13 @@ const char* transaction_type_to_string(TransactionType type);
  * It frees the initial load after setting the code buffer.
  */
 void base_load_initial_content(CodeBuffer *cb, InitialLoad *initial_load);
+
+/*
+ * Base functionality to parse the buffer and create the parse tree.
+ */
+void base_parse_buffer(CodeBuffer *cb);
+
+/* Function to apply a single transaction - this is the internal base functionality for applying and re-applying transactions*/
+void base_apply_transaction(CodeBuffer *cb, Transaction transaction);
 
 #endif /* TOKEN_BUFFER_H */

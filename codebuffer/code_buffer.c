@@ -246,13 +246,14 @@ char32_t* first_line_utf8_to_utf32(const char* utf8_string, size_t *length) {
     return utf32_string; // Return the newly allocated UTF-32 string
 }
 
-/* Function to apply a single transaction - this is the internal base functionality for applying and re-applying transactions*/
-static void base_apply_transaction(CodeBuffer *cb, Transaction transaction);
 
-/* Common utility to safely reallocate a buffer */
+
+/* Common utility to safely reallocate a buffer
+ * WARNING: Any new memory allocated because of an increasing size is not set to zero.
+ */
 void* safe_realloc(void *ptr, size_t size) {
     void *new_ptr;
-    if (ptr) new_ptr = realloc(ptr, size);
+    if (ptr) new_ptr = realloc(ptr, size); // Does not set new memory to zero
     else {
         // If ptr is NULL, we need to allocate new memory and set values to zero
         new_ptr = malloc(size);
@@ -280,6 +281,8 @@ CodeBuffer* create_code_buffer(CommunicationFunctions *comm, ParserFunction pars
     cb->parser_function = parser_function;
     cb->unique_document_id = NULL;
     cb->snapshot_number = 0;
+    cb->snapshot_lines = NULL;
+    cb->snapshot_line_lengths = NULL;
     cb->lines = NULL;
     cb->line_count = 0;
     cb->dirty_lines = NULL;
@@ -321,10 +324,10 @@ void apply_initial_load(CodeBuffer *cb, InitialLoad *initial_load) {
 /* Applying Transactions */
 
 /* Function to apply a single transaction - this is the internal base functionality for applying and re-applying transactions*/
-static void base_apply_transaction(CodeBuffer *cb, Transaction transaction) {
+void base_apply_transaction(CodeBuffer *cb, Transaction transaction) {
     if (!cb) return;
-    char32_t*new_line;
-    char32_t*utf32_content;
+    char32_t *new_line;
+    char32_t *utf32_content;
     size_t content_len;
     int has_attributes = 0;
     if (cb->attributes) {
@@ -458,7 +461,7 @@ static void base_apply_transaction(CodeBuffer *cb, Transaction transaction) {
                             cb->attributes[transaction.pos_line] + transaction.pos_col,
                             (len - transaction.pos_col) * sizeof(CodeBufferCharAttributes));
                     // Insert the new attributes at the position
-                    for (size_t i = len; i < new_len; i++) {
+                    for (size_t i = transaction.pos_col; i < transaction.pos_col + content_len; i++) {
                         cb->attributes[transaction.pos_line][i].token_type = cb->attributes[transaction.pos_line][transaction.pos_col].token_type;
                         cb->attributes[transaction.pos_line][i].severity = cb->attributes[transaction.pos_line][transaction.pos_col].severity;
                         cb->attributes[transaction.pos_line][i].subtree_type = cb->attributes[transaction.pos_line][transaction.pos_col].subtree_type;
@@ -677,7 +680,7 @@ static void base_apply_transaction(CodeBuffer *cb, Transaction transaction) {
 }
 
 /* Function to apply a single transaction */
-void apply_transaction(CodeBuffer *cb, Transaction transaction) {
+void editor_apply_transaction(CodeBuffer *cb, Transaction transaction) {
     // Add a transaction to the transaction list
     cb->transactions = (Transaction *)safe_realloc(cb->transactions, sizeof(Transaction) * (cb->transaction_count + 1));
     // Deep copy the transaction
@@ -723,7 +726,6 @@ void snapshot(CodeBuffer *cb) {
             exit(EXIT_FAILURE);
         }
         memcpy(cb->snapshot_lines[i], cb->lines[i], sizeof(char32_t) * (cb->line_lengths[i]));
-        //cb->snapshot_lines[i][cb->line_lengths[i]] = cb->line_lengths[i];
         cb->snapshot_line_lengths[i] = cb->line_lengths[i];
     }
     cb->snapshot_line_count = cb->line_count;
@@ -739,36 +741,13 @@ void copy_snapshot_to_codebuffer(CodeBuffer *cb) {
     }
 
     // Free existing lines
-    for (i = 0; i < cb->line_count; i++) {
-        free(cb->lines[i]);
-    }
-    free(cb->lines);
-    free(cb->line_lengths);
-    cb->lines = NULL;
-    cb->line_lengths = NULL;
-
-    // Copy snapshot lines
-    cb->lines = (char32_t**)malloc(sizeof(char32_t*) * cb->snapshot_line_count);
-    if (!cb->lines) {
-        perror("Failed to allocate memory for lines");
-        exit(EXIT_FAILURE);
-    }
-    cb->line_lengths = (size_t *)malloc(sizeof(size_t) * cb->snapshot_line_count);
-    if (!cb->line_lengths) {
-        perror("Failed to allocate memory for line_lengths");
-        exit(EXIT_FAILURE);
-    }
-
-    for (i = 0; i < cb->snapshot_line_count; i++) {
-        cb->lines[i] = (char32_t*)malloc(sizeof(char32_t) * (cb->snapshot_line_lengths[i]));
-        if (!cb->lines[i]) {
-            perror("Failed to allocate memory for a line");
-            exit(EXIT_FAILURE);
+    if (cb->lines) {
+        for (i = 0; i < cb->line_count; i++) {
+            if (cb->lines[i]) free(cb->lines[i]);
         }
-        memcpy(cb->lines[i], cb->snapshot_lines[i], sizeof(char32_t) * (cb->snapshot_line_lengths[i]));
-        cb->line_lengths[i] = cb->snapshot_line_lengths[i];
+        free(cb->lines);
     }
-    cb->line_count = cb->snapshot_line_count;
+    if (cb->line_lengths) free(cb->line_lengths);
 
     /*  clear the attributes and node_lines */
     if (cb->attributes) {
@@ -785,6 +764,14 @@ void copy_snapshot_to_codebuffer(CodeBuffer *cb) {
         free(cb->node_lines);
         cb->node_lines = NULL;
     }
+
+    // Copy snapshot line
+    cb->lines = cb->snapshot_lines;
+    cb->line_lengths =cb->snapshot_line_lengths;
+    cb->line_count = cb->snapshot_line_count;
+    cb->snapshot_lines = NULL; // Clear the snapshot lines
+    cb->snapshot_line_lengths = NULL; // Clear the snapshot line lengths
+    cb->snapshot_line_count = 0; // Reset the snapshot line count
 }
 
 /* Function to take a snapshot and get the delta */
@@ -852,7 +839,7 @@ Delta* snapshot_and_get_delta(CodeBuffer *cb) {
 }
 
 /* Function to replay a delta */
-void replay_delta(CodeBuffer *cb, Delta *delta) {
+void base_replay_delta(CodeBuffer *cb, Delta *delta) {
     size_t i;
 
     if (!cb || !delta) return;

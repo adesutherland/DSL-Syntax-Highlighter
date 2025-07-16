@@ -122,15 +122,18 @@ static void* load_initial_content_thread(void *arg) {
     if (data->code_buffer->transaction_count > 0) {
         /* Reset to the snapshot */
         copy_snapshot_to_codebuffer(data->code_buffer);
-
-        /* Replay the transaction since the last snapshot */
-        int i;
-        for (i = 0; i < data->code_buffer->transaction_count; i++) {
-            apply_transaction(data->code_buffer, data->code_buffer->transactions[i]);
-        }
     }
 
     highlight_syntax(data->code_buffer);
+
+    /* Apply the parse result to the code buffer */
+    if (data->code_buffer->transaction_count > 0) {
+        /* Replay the transaction since the snapshot */
+        int i;
+        for (i = 0; i < data->code_buffer->transaction_count; i++) {
+            base_apply_transaction(data->code_buffer, data->code_buffer->transactions[i]);
+        }
+    }
 
     // Signal the parse complete event
     rc = raise_parse_complete_event();
@@ -262,6 +265,9 @@ void load_initial_content(CodeBuffer *cb, InitialLoad *initial_load) {
      * can be used. It frees the initial load after setting the code buffer.
      */
     base_load_initial_content(cb, initial_load);
+
+    /* Set the snapshot of the content */
+    snapshot(cb);
 
     // Highlight the syntax of the editor CodeBuffer
     highlight_syntax(cb);

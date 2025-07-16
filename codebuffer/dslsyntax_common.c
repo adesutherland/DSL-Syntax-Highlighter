@@ -1169,7 +1169,6 @@ void highlight_syntax(CodeBuffer *buffer) {
 
     // Store the old attributes for dirty line processing later
     CodeBufferCharAttributes **old_attributes = buffer->attributes;
-    buffer->attributes = NULL;
 
     // Malloc new attributes
     buffer->attributes = (CodeBufferCharAttributes**)malloc(sizeof(CodeBufferCharAttributes*) * buffer->line_count);
@@ -1189,19 +1188,13 @@ void highlight_syntax(CodeBuffer *buffer) {
         buffer->attributes[i][buffer->line_lengths[i]].subtree_lines = 0; // The last character is a whitespace
     }
 
-    // If node_lines is null, allocate the buffer using safe_realloc which uses malloc and zeros the values
-    if  (buffer->node_lines == NULL) {
-        buffer->node_lines = (CB_Node***)safe_realloc(buffer->node_lines, sizeof(CB_Node**) * buffer->line_count);
-        for (int i = 0; i < buffer->line_count; i++) {
-            buffer->node_lines[i] = (CB_Node**)safe_realloc(buffer->node_lines[i], sizeof(CB_Node*) * buffer->line_lengths[i]);
-        }
-    }
-    // Otherwise clear the existing node lines
-    else {
-        for (int i = 0; i < buffer->line_count; i++) {
-            for (int j = 0; j < buffer->line_lengths[i]; j++) {
-                buffer->node_lines[i][j] = NULL;
-            }
+    // Size and zero node_lines
+    buffer->node_lines = (CB_Node***)safe_realloc(buffer->node_lines, sizeof(CB_Node**) * buffer->line_count);
+    for (int i = 0; i < buffer->line_count; i++) {
+        buffer->node_lines[i] = (CB_Node**)safe_realloc(buffer->node_lines[i], (buffer->line_lengths[i] + 1) * sizeof(CB_Node*));
+        // Initialize the node lines to NULL
+        for (int j = 0; j < buffer->line_lengths[i]; j++) {
+            buffer->node_lines[i][j] = NULL; // No node for this character
         }
     }
 
@@ -1224,7 +1217,6 @@ void highlight_syntax(CodeBuffer *buffer) {
         }
 
         // Free the old attributes
-        // todo what happens if the number of lines changes?
         for (int i = 0; i < buffer->line_count; i++) {
             free(old_attributes[i]);
         }
@@ -1269,13 +1261,23 @@ void base_load_initial_content(CodeBuffer *cb, InitialLoad *initial_load) {
     /* Free the initial load */
     free(initial_load);
 
-    /* Set the snapshot of the content */
-    snapshot(cb);
+    /* Parse the buffer to create the parse tree */
+    base_parse_buffer(cb);
+}
+
+/*
+ * Base functionality to parse the buffer and create the parse tree.
+ */
+void base_parse_buffer(CodeBuffer *cb) {
+    if (cb->parse_tree) {
+        cb_free_token_buffer(cb->parse_tree);
+        cb->parse_tree = NULL;
+    }
 
     if (cb->parser_function) {
-        /* Call the parser function to create the initial parse tree
-         * This could be an editor "emergency parser" or a more complex parser at the
-         * parser / server end
+        /* Call the parser function to create the parse tree
+         * This could be an editor-specific "emergency parser" or
+         * a more complex parser at the parser / server end
          */
         cb->parser_function(cb);
     }

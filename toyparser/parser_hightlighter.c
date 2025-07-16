@@ -41,13 +41,9 @@ void toy_parser(CodeBuffer *codeBuffer) {
 
 void highlight_init(char* source_code, CodeBuffer **cb, CB_ParseTree **tb) {
 
-    /* Create a new CodeBuffer if not provided */
     if (*cb == NULL) {
-        *cb = create_code_buffer(NULL, NULL);
-
-        /* Set initial content */
-        InitialLoad *initial = create_initial_load("doc1", source_code);
-        load_initial_content(*cb, initial);
+        // Panic
+        fprintf(stderr, "PANIC: CodeBuffer is NULL in highlight_init\n");
     }
 
     // Initialize lexer

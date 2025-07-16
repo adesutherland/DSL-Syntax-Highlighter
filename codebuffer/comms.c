@@ -33,22 +33,18 @@ static CB_ParseTree * inproc_send_initial_load(CommunicationFunctions *comm_bloc
 }
 
 // Inproc function to send a delta to the parser
-static void inproc_send_delta(CommunicationFunctions *comm_block, Delta *delta) {
+static CB_ParseTree * inproc_send_delta(CommunicationFunctions *comm_block, Delta *delta) {
     // Inproc function to send a delta to the parser
     // This is a stub for the inproc communication
     // In a real implementation, this would send the delta to the parser
     printf("Sending delta to parser: %d\n", (int)delta->change_version);
     // Get the comms data
     InprocCommsData *comms_data = (InprocCommsData *)comm_block->comms_data;
-    replay_delta(comms_data->parser_code_buffer, delta);
-}
 
-// Inproc function to send a parse result to the editor
-static void inproc_send_parse_result(CommunicationFunctions *comm_block, ParseResult *parse_result) {
-    // Inproc function to send a parse result to the editor
-    // This is a stub for the inproc communication
-    // In a real implementation, this would send the parse result to the editor
-    printf("Sending parse result to editor: %s\n", parse_result->unique_document_id);
+    base_replay_delta(comms_data->parser_code_buffer, delta);
+    CB_ParseTree *result = comms_data->parser_code_buffer->parse_tree;
+    comms_data->parser_code_buffer->parse_tree = NULL; // Disconnect the parser tree from the code buffe
+    return result;
 }
 
 // Inproc communications functions factory
@@ -60,7 +56,6 @@ CommunicationFunctions* create_inproc_communication_functions(CodeBuffer *parser
     }
     comm->send_initial_load = inproc_send_initial_load;
     comm->send_delta = inproc_send_delta;
-    comm->send_parse_result = inproc_send_parse_result;
 
     // Create comms_data
     InprocCommsData *comms_data = (InprocCommsData *)malloc(sizeof(InprocCommsData));
