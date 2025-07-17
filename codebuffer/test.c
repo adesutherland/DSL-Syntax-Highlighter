@@ -9,6 +9,86 @@
 // Function to print the code buffer with the attributes colourised using ansi escape codes
 void print_code_buffer_with_attributes(CodeBuffer *cb);
 
+// Function to apply a transaction and print the buffer
+void test_apply_transaction(CodeBuffer *cb, TransactionType type, int pos_line, int pos_col, char *content, int count)
+{
+    int rc;
+    Transaction txn;
+
+    txn.type = type;
+    txn.pos_line = pos_line; /* Zero-based index */
+    txn.pos_col = pos_col;
+    txn.content = content;
+    txn.count = count;
+
+    // Print the transaction being applied
+    printf("Applying Transaction: Type %s, Line %d, Col %d, Content '%s', Count %d\n",
+           transaction_type_to_string(type), pos_line, pos_col, content ? content : "NULL", count);
+
+    if (!cb) {
+        fprintf(stderr, "CodeBuffer is NULL\n");
+        return;
+    }
+    // enter the critical section again
+    rc = enter_codeblock_critical_section();
+    if (rc != 0) {
+        fprintf(stderr, "Failed to enter critical section: %d\n", rc);
+        exit( 1);
+    }
+    editor_apply_transaction(cb, txn);
+    printf("Buffer After Transaction:\n");
+    print_code_buffer_with_attributes(cb);
+    printf("\n");
+
+    // leave the critical section
+    rc = exit_codeblock_critical_section();
+    if (rc != 0) {
+        fprintf(stderr, "Failed to exit critical section: %d\n", rc);
+        exit(1);
+    }
+}
+
+// Function to print the code buffer with attributes
+void test_print_cb(CodeBuffer *cb, const char *title) {
+    // Enter a critical section to ensure thread safety
+    int rc = enter_codeblock_critical_section();
+    if (rc != 0) {
+        fprintf(stderr, "Failed to enter critical section: %d\n", rc);
+        exit(1);
+    }
+
+    /* Print initial buffer */
+    printf("%s\n", title ? title : "Code Buffer with Attributes:");
+    print_code_buffer_with_attributes(cb);
+    printf("\n");
+
+    // leave the critical section
+    rc = exit_codeblock_critical_section();
+    if (rc != 0) {
+        fprintf(stderr, "Failed to exit critical section: %d\n", rc);
+        exit(1);
+    }
+}
+
+void print_delta(Delta *delta, const char *title) {
+    printf("%s\n", title ? title : "Delta Information:");
+    printf("Change Version: %d\n", (int)delta->change_version);
+    printf("Unique Document ID: %s\n", delta->unique_document_id);
+    for (size_t i = 0; i < delta->transaction_count; i++) {
+        const char* trans = transaction_type_to_string(delta->transactions[i].type);
+        if (delta->transactions[i].content) {
+            printf("Transaction %zu: Type %s, Line %d, Col %d, Content '%s'\n",
+                   i, trans, delta->transactions[i].pos_line,
+                   delta->transactions[i].pos_col, delta->transactions[i].content);
+        } else {
+            printf("Transaction %zu: Type %s, Line %d, Col %d\n",
+                   i, trans, delta->transactions[i].pos_line,
+                   delta->transactions[i].pos_col);
+        }
+    }
+    printf("\n");
+}
+
 int main() {
     CodeBuffer *editor_cb;
     CodeBuffer *parser_cb;
@@ -20,7 +100,7 @@ int main() {
 
     // Loop 100 times to simulate a long-running editor
     // And try to detect race conditions
-    for (int i = 0; i < 10; i++) {
+    for (int i = 0; i < 1; i++) {
 
         editor_init(); // Initialize the editor side of the library
 
@@ -40,107 +120,17 @@ int main() {
 
         // usleep(500000); // Sleep for 100 milliseconds
 
-        // Enter a critical section to ensure thread safety
-        int rc = enter_codeblock_critical_section();
-        if (rc != 0) {
-            fprintf(stderr, "Failed to enter critical section: %d\n", rc);
-            return 1;
-        }
-
-        /* Print initial buffer */
-        printf("Initial Buffer - emergency highlighting:\n");
-        print_code_buffer_with_attributes(editor_cb);
-        printf("\n");
-
-        // leave the critical section
-        rc = exit_codeblock_critical_section();
-        if (rc != 0) {
-            fprintf(stderr, "Failed to exit critical section: %d\n", rc);
-            return 1;
-        }
-
-
-
-        // enter the critical section again
-        rc = enter_codeblock_critical_section();
-        if (rc != 0) {
-            fprintf(stderr, "Failed to enter critical section: %d\n", rc);
-            return 1;
-        }
+        test_print_cb(editor_cb, "Initial Buffer - emergency highlighting:");
 
         /* Perform a transaction: Add a new line */
-        txn1.type = TRANSACTION_ADDLINE;
-        txn1.pos_line = 5; /* Zero-based index */
-        txn1.pos_col = 0;
-        txn1.content = "say \"New line added.\"";
-        txn1.count = 0;
-        editor_apply_transaction(editor_cb, txn1);
-
-        printf("Buffer After 1:\n");
-        print_code_buffer_with_attributes(editor_cb);
-        printf("\n");
-
-        // leave the critical section
-        rc = exit_codeblock_critical_section();
-        if (rc != 0) {
-            fprintf(stderr, "Failed to exit critical section: %d\n", rc);
-            return 1;
-        }
-
-
-        // enter the critical section again
-        rc = enter_codeblock_critical_section();
-        if (rc != 0) {
-            fprintf(stderr, "Failed to enter critical section: %d\n", rc);
-            return 1;
-        }
+        test_apply_transaction(editor_cb, TRANSACTION_ADDLINE, 5, 0, "say \"New line added.\"", 0);
 
         /* Perform a transaction: Add characters */
-        txn2.type = TRANSACTION_ADDCHARS;
-        txn2.pos_line = 0;
-        txn2.pos_col = 4; /* After 'int ' */
-        txn2.content = "const ";
-        txn2.count = 0;
-        editor_apply_transaction(editor_cb, txn2);
-
-        printf("Buffer After 2:\n");
-        print_code_buffer_with_attributes(editor_cb);
-        printf("\n");
-
-        // leave the critical section
-        rc = exit_codeblock_critical_section();
-        if (rc != 0) {
-            fprintf(stderr, "Failed to exit critical section: %d\n", rc);
-            return 1;
-        }
-
-
-
-        // enter the critical section again
-        rc = enter_codeblock_critical_section();
-        if (rc != 0) {
-            fprintf(stderr, "Failed to enter critical section: %d\n", rc);
-            return 1;
-        }
+        test_apply_transaction(editor_cb, TRANSACTION_ADDCHARS, 0, 4, "const ", 0);
 
         /* Perform a transaction: Delete characters */
-        txn3.type = TRANSACTION_DELETECHARS;
-        txn3.pos_line = 2;
-        txn3.pos_col = 4; /* Starting at 'x' */
-        txn3.count = 1;    /* Delete 'x' */
-        txn3.content = NULL;
-        editor_apply_transaction(editor_cb, txn3);
-
-        printf("Buffer After 3:\n");
-        print_code_buffer_with_attributes(editor_cb);
-        printf("\n");
-
-        // leave the critical section
-        rc = exit_codeblock_critical_section();
-        if (rc != 0) {
-            fprintf(stderr, "Failed to exit critical section: %d\n", rc);
-            return 1;
-        }
+        /* Starting at 'x' in line 2, column 4 and deleting 1 character ('x') */
+        test_apply_transaction(editor_cb, TRANSACTION_DELETECHARS, 2, 4, NULL, 1);
 
         /* Wait for Parse complete */
         if (wait_for_parse_complete_event() != 0) {
@@ -148,41 +138,17 @@ int main() {
             return 1;
         }
 
-        printf("Buffer After Parse Complete:\n");
-        print_code_buffer_with_attributes(editor_cb);
-        printf("\n");
+        test_print_cb(editor_cb, "Buffer After Parse Complete:");
 
+        process_delta(editor_cb);
 
-/*
-        // Take a snapshot and get the delta
-        delta = snapshot_and_get_delta(editor_cb);
-        if (delta) {
-            printf("Delta after transactions:\n");
-            printf("Change Version: %d\n", (int)delta->change_version);
-            printf("Unique Document ID: %s\n", delta->unique_document_id);
-            for (size_t i = 0; i < delta->transaction_count; i++) {
-                const char* trans = transaction_type_to_string(delta->transactions[i].type);
-                if (delta->transactions[i].content) {
-                    printf("Transaction %zu: Type %s, Line %d, Col %d, Content '%s'\n",
-                           i, trans, delta->transactions[i].pos_line,
-                           delta->transactions[i].pos_col, delta->transactions[i].content);
-                } else {
-                    printf("Transaction %zu: Type %s, Line %d, Col %d\n",
-                           i, trans, delta->transactions[i].pos_line,
-                           delta->transactions[i].pos_col);
-                }
-            }
-            printf("\n");
+        // Wait for the parser to process the delta
+        if (wait_for_parse_complete_event() != 0) {
+            fprintf(stderr, "Error waiting for parse complete event after delta processing\n");
+            return 1;
         }
 
-        // Print updated buffer
-        printf("Updated Buffer:\n");
-        print_code_buffer_with_attributes(editor_cb);
-        printf("\n");
-        */
-
-        /* Free the delta */
-        //free_delta(delta);
+        test_print_cb(editor_cb, "Buffer After Delta Processing:");
 
         /* Free the CodeBuffer */
         free_code_buffer(editor_cb);
@@ -263,8 +229,16 @@ void print_code_buffer_with_attributes(CodeBuffer *cb) {
                 printf("%s%s",severity_to_ansi_escape(last_severity), attribute_to_ansi_escape(last_type));
             }
             // Print the character
-            size_t s = utf32_to_utf8_char(cb->lines[i][j], utf8_char, sizeof(utf8_char));
-            utf8_char[s] = 0;
+            // Us the utf32 character invalid or unprintable
+            if (cb->lines[i][j] < 32 || cb->lines[i][j] > 126) {
+                // Print a placeholder for unprintable characters
+                utf8_char[0] = '?';
+                utf8_char[1] = 0;
+            } else {
+                // Convert the utf32 character to utf8
+                size_t s = utf32_to_utf8_char(cb->lines[i][j], utf8_char, sizeof(utf8_char));
+                utf8_char[s] = 0; // Null-terminate the string
+            }
             printf("%s", utf8_char);
         }
         printf("\n");

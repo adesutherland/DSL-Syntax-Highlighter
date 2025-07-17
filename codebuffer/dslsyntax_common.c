@@ -1106,21 +1106,21 @@ static void highlight_syntax_node(CB_Node *node, __attribute__((unused)) size_t 
         int subtree_lines = 1;
         size_t len = node->length;
         // Deduct the rest of the length of the first line
-        if (len > cb->line_lengths[line - 1] - col) len = cb->line_lengths[line - 1] - col;
+        if (len > cb->line_lengths[line - 1] - col) len -= cb->line_lengths[line - 1] - col + 1;
         else len = 0;
         // Now loop through the lines and count how many more lines the subtree spans
         size_t l = line;
         while (len) {
             subtree_lines++;
             l++;
+            if (l - 1 >= cb->line_count) {
+                fprintf(stderr, "PANIC: Node spans more lines than the buffer has in highlight_syntax_node (1)\n");
+                exit(1);
+            }
             if (len > cb->line_lengths[l - 1]) {
-                len -= cb->line_lengths[l - 1];
+                len -= cb->line_lengths[l - 1] + 1; // +1 for the line break
             } else {
                 len = 0; // No more lines to process
-            }
-            if (len && (l - 1 > cb->line_count)) {
-                fprintf(stderr, "PANIC: Node spans more lines than the buffer has in highlight_syntax_node\n");
-                exit(1);
             }
         }
         cb->attributes[line - 1][col].subtree_type = node->type; // Set the subtree type
@@ -1147,7 +1147,7 @@ static void highlight_syntax_node(CB_Node *node, __attribute__((unused)) size_t 
             line++;
             col = 0;
             if (line - 1 > cb->line_count) {
-                fprintf(stderr, "PANIC: Node spans more lines than the buffer has in highlight_syntax_node\n");
+                fprintf(stderr, "PANIC: Node spans more lines than the buffer has in highlight_syntax_node (2)\n");
                 exit(1);
             }
         }

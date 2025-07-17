@@ -29,6 +29,14 @@ InitialLoad* create_initial_load(const char *unique_document_id, const char *con
  */
 void load_initial_content(CodeBuffer *cb, InitialLoad *initial_load);
 
+/*
+ * Creates and processes the delta and sends it to the parser.
+ *
+ * It calls the communication function to send the initial load to the parser
+ * The results of which will be applied to the code buffer when it arrives.
+ */
+void process_delta(CodeBuffer *cb);
+
 // Highlights the buffer using its parse tree
 void highlight_syntax(CodeBuffer *buffer);
 

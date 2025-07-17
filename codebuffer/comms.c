@@ -26,6 +26,7 @@ static CB_ParseTree * inproc_send_initial_load(CommunicationFunctions *comm_bloc
     InprocCommsData *comms_data = (InprocCommsData *)comm_block->comms_data;
 
     parser_load_initial_content(comms_data->parser_code_buffer, initial_load); // Note this frees the initial_load_copy
+
     CB_ParseTree *result = comms_data->parser_code_buffer->parse_tree;
     comms_data->parser_code_buffer->parse_tree = NULL; // Disconnect the parser tree from the code buffer
 
@@ -41,7 +42,9 @@ static CB_ParseTree * inproc_send_delta(CommunicationFunctions *comm_block, Delt
     // Get the comms data
     InprocCommsData *comms_data = (InprocCommsData *)comm_block->comms_data;
 
-    base_replay_delta(comms_data->parser_code_buffer, delta);
+    base_replay_delta(comms_data->parser_code_buffer, delta); // Apply the delta to the parser code buffer
+    base_parse_buffer(comms_data->parser_code_buffer); // Reparse the buffer after applying the delt
+
     CB_ParseTree *result = comms_data->parser_code_buffer->parse_tree;
     comms_data->parser_code_buffer->parse_tree = NULL; // Disconnect the parser tree from the code buffe
     return result;

@@ -470,7 +470,7 @@ void base_apply_transaction(CodeBuffer *cb, Transaction transaction) {
 
                     // Update the node_lines - this should apply the same node as the line and position being added to
                     cb->node_lines[transaction.pos_line] = (CB_Node**)safe_realloc(cb->node_lines[transaction.pos_line],
-                                                                                   sizeof(CB_Node*) * new_len);
+                                                                                   sizeof(CB_Node*) * (new_len + 1));
                     // Move the existing node_lines after the position
                     memmove(cb->node_lines[transaction.pos_line] + transaction.pos_col + content_len,
                             cb->node_lines[transaction.pos_line] + transaction.pos_col,
