@@ -11,9 +11,6 @@ void ast_to_token_buffer_worker(ASTNode *node, CB_ParseTree *tb);
 void toy_parser(CodeBuffer *codeBuffer) {
     char *source_code = get_code_buffer_source(codeBuffer);
 
-    // Print the source code of the parser buffer
-    printf("Source Code of Parser Buffer:\n%s\n", source_code);
-
     // Initialize lexer
     head = 0;
     Lexer lexer = {source_code, 0, source_code[0], 1, 0};
@@ -35,6 +32,9 @@ void toy_parser(CodeBuffer *codeBuffer) {
 
     // Print the CB_ParseTree
     // cb_print_token_buffer(codeBuffer, tb);
+
+    // sleep to simulate some processing time
+    usleep(1000000); // Sleep for 1000 milliseconds to simulate processing time
 
     codeBuffer->parse_tree = tb; // Set the parse tree in the editor CodeBuffer
 }

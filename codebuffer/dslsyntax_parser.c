@@ -19,6 +19,4 @@ void parser_load_initial_content(CodeBuffer *cb, InitialLoad *initial_load) {
     }
 
     base_load_initial_content(cb, initial_load);
-    // sleep to simulate some processing time
-    // usleep(1000000); // Sleep for 1000 milliseconds to simulate processing time
 }

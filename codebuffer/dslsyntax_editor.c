@@ -294,7 +294,6 @@ static void* process_delta_thread(void *arg) {
 
     /* Send the delta to the parser */
     CB_ParseTree *result = data->code_buffer->communication_functions->send_delta(data->code_buffer->communication_functions, data->delta);
-// sleep(2); // Simulate some delay for the parser to process the initial load
 
     /* Enter the critical section */
     int rc = enter_codeblock_critical_section();

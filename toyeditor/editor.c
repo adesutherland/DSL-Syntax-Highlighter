@@ -6,6 +6,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <ctype.h>
+#include <errno.h>
 #ifdef _WIN32
 #include <windows.h>
 typedef HANDLE ThreadType;
@@ -17,6 +18,8 @@ typedef DWORD (WINAPI *ThreadFunctionType)(LPVOID lpThreadParameter);
 #endif
 
 #include "dslsyntax_common.h"
+#include "dslsyntax_editor.h"
+#include "parser_highlighter.h" // Toy parser highlighter header
 
 #define CTRL_KEY(k) ((k) & 0x1f)
 #define MAX_LINES 1000
@@ -53,12 +56,16 @@ typedef struct TextBuffer {
     char **rows;
     unsigned char **row_syntax; // Syntax highlighting - contains the type of each character corresponding to PAIR_* colours
     unsigned char **message_number; // Syntax highlighting - contains the message number of each character
+    CodeBuffer *code_buffer; // CodeBuffer for the syntax highlighting
 } TextBuffer;
 
 typedef struct ErrorMessage {
     char *text;
     char severity;
 } ErrorMessage;
+
+// SDL Highlighter End Point
+CommunicationFunctions *sdlhighlighter = NULL;
 
 // Message array
 ErrorMessage error_messages[256];
@@ -69,6 +76,13 @@ char loaded_filename[256];
 // Scroll position - line and column
 int scroll_line = 0;
 int scroll_col = 0;
+
+// Function to handle errors and exit the program
+void die(const char *s) {
+    endwin();
+    perror(s);
+    exit(EXIT_FAILURE);
+}
 
 static void cross_platform_sleep_ms(int milliseconds) {
     if (milliseconds <= 0) return;
@@ -88,64 +102,72 @@ static void cross_platform_sleep_ms(int milliseconds) {
  *         ERR (from curses.h) on timeout or error.
  */
 #define GETCH_EVENT_RAISED (-2)
-int getch_or_parse_event() {
+int getch_or_parse_event(TextBuffer *buffer) {
     int result_char = ERR;
-    long long start_time_ms = 0;
-    int event_detected_flag = 0; /* Flag to indicate if the event was detected during polling */
     WINDOW *win = stdscr;
+
+    /* Send Any Updates to the SDL Highlighter */
+    if (buffer->code_buffer->transaction_count > 0) {
+        if (!editor_is_parsing_thread_active()) {
+            process_delta(buffer->code_buffer);
+        }
+    }
+
+    if (!editor_is_parsing_thread_active()) {
+        // Optimized path: No active event source, just call wgetch directly ...
+        // However, we do need to check if an unhandled parse thread just exited
+        if (check_parse_complete_event() == 1) {
+            reset_parse_complete_event();
+            return GETCH_EVENT_RAISED;
+        }
+        return wgetch(win);
+    }
 
     // This gives access to any parsing thread
     if (exit_codeblock_critical_section() != 0) {
         fprintf(stderr, "polled_getch: Failed to exit CS!\n");
-        enter_codeblock_critical_section(); /* Attempt to re-enter to maintain consistency */
-        return ERR;
+        die("polled_getch: Critical section error");
     }
 
-    if (!editor_is_parsing_thread_active()) {
-        /* Optimized path: No active event source, just call wgetch directly */
-        result_char = wgetch(win);
-    } else {
-        /* Polling path: Event source is active, perform polling. */
-        for (;;) { /* Polling loop */
-            /* Check for the event */
-            if (check_parse_complete_event() == 1) {
-                result_char = GETCH_EVENT_RAISED;
-                event_detected_flag = 1;
-                break;
-            }
-
-            /* Check for ncurses input (non-blockingly for this poll iteration) */
-            nodelay(win, TRUE);
-            int ch_input = wgetch(win);
-            nodelay(win, FALSE); /* Restore blocking behavior for future calls by other parts */
-
-            if (ch_input != ERR) {
-                result_char = ch_input;
-                break;
-            }
-
-            /* Sleep */
-            cross_platform_sleep_ms(20);
+    /* Polling path: Event source is active, perform polling. */
+    for (;;) { /* Polling loop */
+        /* Check for the event */
+        if (check_parse_complete_event() == 1) {
+            reset_parse_complete_event();
+            result_char = GETCH_EVENT_RAISED;
+            break;
         }
+
+        /* Check for ncurses input (non-blockingly for this poll iteration) */
+        nodelay(win, TRUE);
+        int ch_input = wgetch(win);
+        nodelay(win, FALSE); /* Restore blocking behavior for future calls by other parts */
+
+        if (ch_input != ERR) {
+            result_char = ch_input;
+            break;
+        }
+
+        /* Sleep */
+        cross_platform_sleep_ms(20);
     }
 
     // This takes control for this editor main thread
     if (enter_codeblock_critical_section() != 0) {
         fprintf(stderr, "polled_getch: CRITICAL - Failed to re-enter CS!\n");
-        /* State is potentially inconsistent. */
+        die("polled_getch: Critical section error");
     }
 
     return result_char;
 }
 
-// Convert the CB_ParseTree token type to a highlight code
+// Convert the CB_ParseTree to a highlight code
 // 4 least significant bits are used for the pair code
 // 5th bit used to indicate whether the token is underlined (16)
 // 6th bit used to indicate whether the token is bold (32)
 // 7th bit used to indicate whether the token is italicized (64)
 // 8th bit used to indicate whether the token is dimmed (128)
-unsigned char token_to_highlight(CB_Node *token) {
-    CB_NodeType type = token->type;
+unsigned char cb_nodetype_to_highlight(CB_NodeType type) {
     unsigned char highlight;
     switch (type) {
         case LEXER_COMMENT:
@@ -176,9 +198,6 @@ unsigned char token_to_highlight(CB_Node *token) {
             break;
         default:
             highlight = PAIR_BODY;
-    }
-    if (token->message) {
-        highlight = highlight + ATTR_UNDERLINE;
     }
     return highlight;
 }
@@ -214,93 +233,40 @@ void clear_all_messages() {
     }
 }
 
-// Walker callback for highlight_syntax() to process the toksns and set the syntax highlighting
+// Highlights the whole buffer
+void highlight_buffer(TextBuffer *buffer) {
+    // Clear all messages
+    clear_all_messages();
 
-// User date typedef
-typedef struct {
-    TextBuffer *buffer;
-    CodeBuffer *codeBuffer;
-    CB_ParseTree *tokenBuffer;
-} HighlightSyntaxUserData;
-
-void highlight_syntax_node(CB_Node *node, __attribute__((unused)) size_t depth, void *user_data) {
-    HighlightSyntaxUserData *data = (HighlightSyntaxUserData *)user_data;
-    if (data == NULL || node == NULL) {
-        fprintf(stderr, "PANIC: Invalid data for highlight_syntax_node\n");
-        exit(1);
-    }
-    if (node->child != NULL) {
-        return;
-    }
-
-    // Get the line and column position of the token
-    size_t line = 0, col = 0;
-    get_code_buffer_part(data->codeBuffer, node->pos, node->length, &line, &col, NULL);
-
-    // Set the syntax highlighting for the token
-    unsigned char highlight = token_to_highlight(node);
-
-    // Set the message number for the token
-    unsigned char message_number = 0;
-    if (node->message) {
-        message_number = add_message(node->message, node->severity);
-    }
-
-    // How much of the node has been written to the line - tokens might span lines, so we need to check
-    int written = 0;
-    // Loop through the lines and set the syntax highlighting and message number
-    while (written < node->length) {
-        // Get the max node length that fits on the line
-        int max_length = line > data->buffer->num_rows?0:(int)strlen(data->buffer->rows[line - 1]) - (int)col; // Ints so that negative values are possible
-        int length = (int)node->length - written;
-        if (length > max_length) {
-            length = max_length;
-            written++; // To take into account the newline character
-        }
-        for (int i = 0; i < length; i++) {
-            // Set the syntax highlighting
-            data->buffer->row_syntax[line - 1][col + i] = highlight;
-            // Set the message number
-            data->buffer->message_number[line - 1][col + i] = message_number;
-        }
-        written += length;
-        if (written < node->length) {
-            line++;
-            col = 0;
+    // Set syntax highlighting
+    for (int i = 0; i < buffer->num_rows; i++) {
+        for (int j = 0; j < strlen(buffer->rows[i]); j++) {
+            // Get the character at position j in row i
+            char c = buffer->rows[i][j];
+            // Get the code buffer character attributes for this position
+            CodeBufferCharAttributes attr = buffer->code_buffer->attributes[i][j];
+            // Set the syntax highlighting for this character
+            buffer->row_syntax[i][j] = cb_nodetype_to_highlight(attr.token_type);
         }
     }
 }
 
-// Highlights the whole buffer
-void highlight_syntax(TextBuffer *buffer) {
-    char source_code[100000];
+// Function to create the source code char* from the TextBuffer rows
+// Returns a newly allocated string that contains the source code
+char *create_source_code_from_buffer(TextBuffer *buffer) {
+    size_t total_length = 0;
+    for (int i = 0; i < buffer->num_rows; i++) {
+        total_length += strlen(buffer->rows[i]) + 1; // +1 for newline
+    }
+    char *source_code = malloc(total_length + 1);
+    if (!source_code) die("malloc"); // die() Never returns
+
     source_code[0] = '\0';
-    // Create one buffer out of all the lines from buffer
     for (int i = 0; i < buffer->num_rows; i++) {
         strcat(source_code, buffer->rows[i]);
         strcat(source_code, "\n");
     }
-    CB_ParseTree *tb;
-    CodeBuffer *cb;
-    highlight_init(source_code, &cb, &tb);
-
-    // Clear all syntax highlighting
-    for (int i = 0; i < buffer->num_rows; i++) {
-        memset(buffer->row_syntax[i], PAIR_BODY, strlen(buffer->rows[i]));
-        memset(buffer->message_number[i], 0, strlen(buffer->rows[i]));
-    }
-    // Clear all messages
-    clear_all_messages();
-
-    /* Walk through the token buffer and set the syntax highlighting */
-    HighlightSyntaxUserData data = {buffer, cb, tb};
-    cb_walk_tree_top_down(tb, highlight_syntax_node, &data);
-}
-
-void die(const char *s) {
-    endwin();
-    perror(s);
-    exit(EXIT_FAILURE);
+    return source_code;
 }
 
 void load_file(TextBuffer *buffer, const char *filename) {
@@ -351,7 +317,14 @@ void load_file(TextBuffer *buffer, const char *filename) {
 
     strcpy(loaded_filename, filename);
 
-    highlight_syntax(buffer);
+    // Create editor CodeBuffer and load the file into it
+    char* source_code = create_source_code_from_buffer(buffer);
+    buffer->code_buffer = create_code_buffer(sdlhighlighter,0);
+    InitialLoad *initial = create_initial_load(loaded_filename, source_code);
+    load_initial_content(buffer->code_buffer, initial);
+    free(source_code); // Free the source code string
+
+    highlight_buffer(buffer); // Highlight the buffer (from the SDL highlighter output)
 }
 
 void save_file(TextBuffer *buffer, const char *filename) {
@@ -483,6 +456,21 @@ void insert_char(TextBuffer *buffer, int x, int y, int c) {
     row[x] = c;
     buffer->rows[y] = row;
 
+    /* Apply DSL Highlighter Transaction */
+    CodeBuffer *cb = buffer->code_buffer;
+
+    // Create a transaction to apply
+    Transaction txn;
+    txn.type = TRANSACTION_ADDCHARS;
+    txn.pos_line = y; // Zero-based index
+    txn.pos_col = x;
+    txn.count = 1; // Insert one character
+    char content[2] = {0}; // Buffer for the character to insert
+    content[0] = (char)c; // Convert the character to a string
+    txn.content = content;
+
+    editor_apply_transaction(cb, txn);
+/*
     // Syntax highlighting - all characters are the same as the previous character by default
     unsigned char *syntax = buffer->row_syntax[y];
     syntax = realloc(syntax, len + 2);
@@ -496,6 +484,7 @@ void insert_char(TextBuffer *buffer, int x, int y, int c) {
     memmove(&message_number[x + 1], &message_number[x], len - x + 1);
     message_number[x] = message_number[x - 1];
     buffer->message_number[y] = message_number;
+*/
 }
 
 void delete_char(TextBuffer *buffer, int x, int y) {
@@ -507,6 +496,17 @@ void delete_char(TextBuffer *buffer, int x, int y) {
     memmove(&row[x - 1], &row[x], len - x + 1);
     memmove(&buffer->row_syntax[y][x - 1], &buffer->row_syntax[y][x], len - x + 1);
 
+    /* Apply DSL Highlighter Transaction */
+    CodeBuffer *cb = buffer->code_buffer;
+    // Create a transaction to apply
+    Transaction txn;
+    txn.type = TRANSACTION_DELETECHARS;
+    txn.pos_line = y; // Zero-based index
+    txn.pos_col = x - 1; // Zero-based index
+    txn.count = 1; // Delete one character
+    txn.content = NULL; // No content for delete transaction
+    editor_apply_transaction(cb, txn);
+/*
     // Decide if the message should be deleted - if the message number is different from the previous and the next
     // character's message number, then delete it
     unsigned char message_number = buffer->message_number[y][x - 1];
@@ -517,6 +517,7 @@ void delete_char(TextBuffer *buffer, int x, int y) {
     }
     // Finally, remove the deleted character from the message number array
     memmove(&buffer->message_number[y][x - 1], &buffer->message_number[y][x], len - x + 1);
+*/
 }
 
 int main(int argc, char *argv[]) {
@@ -527,6 +528,18 @@ int main(int argc, char *argv[]) {
 
     // Initialize error messages
     memset(error_messages, 0, sizeof(error_messages));
+
+    // Set up the SDL highlighter - inproc to the toy parser
+    editor_init(); // Initialize the editor side of the library
+    CodeBuffer *parser_cb = create_code_buffer(0, toy_parser); // Create parser CodeBuffer
+    sdlhighlighter = create_inproc_communication_functions(parser_cb); // Create communication endpoint
+
+    // This takes control for this editor main thread
+    if (enter_codeblock_critical_section() != 0) {
+        fprintf(stderr, "CRITICAL - Failed to re-enter CS!\n");
+        die("Critical section error");
+        /* State is potentially inconsistent. */
+    }
 
     TextBuffer buffer = {0, NULL};
     load_file(&buffer, argv[1]);
@@ -557,8 +570,13 @@ int main(int argc, char *argv[]) {
 
     while (1) {
         editor_refresh(&buffer, cursor_x, cursor_y);
-        int c = getch();
+        int c = getch_or_parse_event(&buffer);
 
+        if (c == GETCH_EVENT_RAISED) {
+            // Handle the event raised by the parser
+            highlight_buffer(&buffer);
+            continue; // Refresh the display after highlighting
+        }
         if (c == CTRL_KEY('q')) {
             break;
         } else if (c == CTRL_KEY('s')) {
@@ -621,7 +639,7 @@ int main(int argc, char *argv[]) {
                 cursor_y--;
                 cursor_x = prev_len;
             }
-            highlight_syntax(&buffer);
+            highlight_buffer(&buffer);
         } else if (c == '\n') {
             char *current_row = buffer.rows[cursor_y];
             int len = (int)strlen(current_row);
@@ -661,13 +679,31 @@ int main(int argc, char *argv[]) {
             buffer.num_rows++;
             cursor_y++;
             cursor_x = 0;
-            highlight_syntax(&buffer);
+            highlight_buffer(&buffer);
         } else if (isprint(c)) {
             insert_char(&buffer, cursor_x, cursor_y, c);
             cursor_x++;
-            highlight_syntax(&buffer);
+            highlight_buffer(&buffer);
         }
     }
+
+    // This gives access to any parsing thread
+    if (exit_codeblock_critical_section() != 0) {
+        fprintf(stderr, "Failed to exit CS!\n");
+        die("Critical section error");
+    }
+
+    /* Free the CodeBuffer */
+    free_code_buffer(buffer.code_buffer);
+
+    /* Free the parser CodeBuffer */
+    free_code_buffer(parser_cb);
+
+    /* Free the communication functions */
+    free_inproc_communication_functions(sdlhighlighter);
+
+    /* Free the editor library */
+    editor_free();
 
     endwin();
     free_buffer(&buffer);

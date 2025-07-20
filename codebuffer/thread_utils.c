@@ -39,15 +39,22 @@ int init_parser_thread_utils(void) {
         return -1;
     }
 #else /* POSIX */
-    if (pthread_mutex_init(&codeblock_mutex, NULL) != 0) {
+    pthread_mutexattr_t attr;
+    pthread_mutexattr_init(&attr);
+    pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
+
+    if (pthread_mutex_init(&codeblock_mutex, &attr) != 0) {
         perror("Failed to initialize global mutex");
+        pthread_mutexattr_destroy(&attr);
         return -1;
     }
-    if (pthread_mutex_init(&parser_active_mutex, NULL) != 0) {
+    if (pthread_mutex_init(&parser_active_mutex, &attr) != 0) {
         perror("Failed to initialize parser active mutex");
         pthread_mutex_destroy(&codeblock_mutex); /* Clean up mutex */
+        pthread_mutexattr_destroy(&attr);
         return -1;
     }
+    pthread_mutexattr_destroy(&attr); /* Attributes are no longer needed */
 #endif
     parser_thread_initialized = 1;
     parsing_thread_active = 0; // No parsing thread is active initially
@@ -355,7 +362,7 @@ int join_parser_thread() {
 /* --- Event Management Implementations --- */
 
 int raise_parse_complete_event(void) {
-    printf("raise_parse_complete_event called\n");
+    // printf("raise_parse_complete_event called\n");
     if (!parse_complete_event.initialized) {
         return -1;
     }

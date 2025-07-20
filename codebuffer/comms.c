@@ -20,7 +20,7 @@ static CB_ParseTree * inproc_send_initial_load(CommunicationFunctions *comm_bloc
     // This is a stub for the inproc communication
 
     // In a real implementation, this would send the initial load to the parser
-    printf("Sending initial load to parser: %s\n", initial_load->unique_document_id);
+    //printf("Sending initial load to parser: %s\n", initial_load->unique_document_id);
 
     // Get the comms data
     InprocCommsData *comms_data = (InprocCommsData *)comm_block->comms_data;
@@ -38,7 +38,7 @@ static CB_ParseTree * inproc_send_delta(CommunicationFunctions *comm_block, Delt
     // Inproc function to send a delta to the parser
     // This is a stub for the inproc communication
     // In a real implementation, this would send the delta to the parser
-    printf("Sending delta to parser: %d\n", (int)delta->change_version);
+
     // Get the comms data
     InprocCommsData *comms_data = (InprocCommsData *)comm_block->comms_data;
 

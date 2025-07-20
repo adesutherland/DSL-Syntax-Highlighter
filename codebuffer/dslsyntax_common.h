@@ -242,7 +242,7 @@ typedef void (*ParserFunction)(struct CodeBuffer *cb);
  * syntax highlighting and error messages. An editor can then access
  * the parser node for full details if need be */
 typedef struct CodeBufferCharAttributes {
-    char token_type;   // CB_NodeType coded as char - used to determine highlighting
+    char token_type;   // gcoded as char - used to determine highlighting
     char severity;     // CB_Severity coded as char - indicates is a message is associated with the character
     char subtree_type; // CB_NodeType coded as char - indicates if the character starts a parse tree, an editor might use this for code folding
     unsigned char subtree_lines; // Number of lines in the subtree - used for code folding
