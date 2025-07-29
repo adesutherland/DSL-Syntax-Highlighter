@@ -40,4 +40,10 @@ void process_delta(CodeBuffer *cb);
 // Highlights the buffer using its parse tree
 void highlight_syntax(CodeBuffer *buffer);
 
+/* Utility to convert the first line of a null terminated utf8 or ascii string to */
+/* TODO - Does not handle grapheme clusters */
+/* Newline is not included in the output */
+/* Returns 0 on success, 1 on failure (e.g., memory allocation failure) */
+int first_line_utf8_to_line(const char* utf8_string, CodeBufferLine* line);
+
 #endif //DSLSYNTAX_EDITOR_H

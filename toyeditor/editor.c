@@ -54,21 +54,12 @@ typedef DWORD (WINAPI *ThreadFunctionType)(LPVOID lpThreadParameter);
 typedef struct TextBuffer {
     int num_rows;
     char **rows;
-    unsigned char **row_syntax; // Syntax highlighting - contains the type of each character corresponding to PAIR_* colours
-    unsigned char **message_number; // Syntax highlighting - contains the message number of each character
     CodeBuffer *code_buffer; // CodeBuffer for the syntax highlighting
 } TextBuffer;
 
-typedef struct ErrorMessage {
-    char *text;
-    char severity;
-} ErrorMessage;
 
 // SDL Highlighter End Point
 CommunicationFunctions *sdlhighlighter = NULL;
-
-// Message array
-ErrorMessage error_messages[256];
 
 // For the file name
 char loaded_filename[256];
@@ -106,7 +97,7 @@ int getch_or_parse_event(TextBuffer *buffer) {
     int result_char = ERR;
     WINDOW *win = stdscr;
 
-    /* Send Any Updates to the SDL Highlighter */
+    // Send Any Updates to the SDL Highlighter
     if (buffer->code_buffer->transaction_count > 0) {
         if (!editor_is_parsing_thread_active()) {
             process_delta(buffer->code_buffer);
@@ -167,88 +158,52 @@ int getch_or_parse_event(TextBuffer *buffer) {
 // 6th bit used to indicate whether the token is bold (32)
 // 7th bit used to indicate whether the token is italicized (64)
 // 8th bit used to indicate whether the token is dimmed (128)
-unsigned char cb_nodetype_to_highlight(CB_NodeType type) {
+static unsigned char cb_nodetype_to_highlight(CodeBufferCharacter attribute) {
     unsigned char highlight;
-    switch (type) {
-        case LEXER_COMMENT:
-            highlight = PAIR_COMMENT + ATTR_DIM;
+    switch (attribute.severity) {
+        case CB_ERROR:
+            highlight = PAIR_ERRORMESSAGE;
             break;
-        case LEXER_KEYWORD:
-            highlight = PAIR_KEYWORD;
+        case CB_WARNING:
+            highlight = PAIR_WARNINGMESSAGE;
             break;
-        case LEXER_STRING_LITERAL:
-            highlight = PAIR_STRING;
-            break;
-        case LEXER_NUMBER_LITERAL:
-            highlight = PAIR_NUM;
-            break;
-        case LEXER_OPERATOR:
-        case LEXER_OPERATOR_ASSIGN:
-        case LEXER_OPERATOR_ARITHMETIC:
-        case LEXER_OPERATOR_LOGICAL:
-        case LEXER_LH_EXPR:
-        case LEXER_RH_EXPR:
-            highlight = PAIR_OPERATOR;
-            break;
-        case LEXER_IDENTIFIER:
-            highlight = PAIR_VARIABLE;
-            break;
-        case SYNTAX_ERROR:
-            highlight = PAIR_ERROR;
+        case CB_INFORMATION:
+            highlight = PAIR_INFOMESSAGE;
             break;
         default:
-            highlight = PAIR_BODY;
+            switch (attribute.token_type) {
+            case LEXER_COMMENT:
+                    highlight = PAIR_COMMENT + ATTR_DIM;
+                    break;
+            case LEXER_KEYWORD:
+                    highlight = PAIR_KEYWORD;
+                    break;
+            case LEXER_STRING_LITERAL:
+                    highlight = PAIR_STRING;
+                    break;
+            case LEXER_NUMBER_LITERAL:
+                    highlight = PAIR_NUM;
+                    break;
+            case LEXER_OPERATOR:
+            case LEXER_OPERATOR_ASSIGN:
+            case LEXER_OPERATOR_ARITHMETIC:
+            case LEXER_OPERATOR_LOGICAL:
+            case LEXER_LH_EXPR:
+            case LEXER_RH_EXPR:
+                    highlight = PAIR_OPERATOR;
+                    break;
+            case LEXER_IDENTIFIER:
+                    highlight = PAIR_VARIABLE;
+                    break;
+            case SYNTAX_ERROR:
+                    highlight = PAIR_ERROR;
+                    break;
+            default:
+                    highlight = PAIR_BODY;
+            }
     }
+
     return highlight;
-}
-
-// Add a message to the error_messages array, finding an empty slot and returning the
-// index is one base so that 0 can be used as a null value
-unsigned char add_message(const char *text, char severity) {
-    for (int i = 0; i < 256; i++) {
-        if (!error_messages[i].text) {
-            error_messages[i].text = strdup(text);
-            error_messages[i].severity = severity;
-            return i + 1;
-        }
-    }
-    return 0;
-}
-
-// Clear a single message by index from the error_messages array
-// index is one base so that 0 can be used as a null value
-void clear_message(unsigned char index) {
-    if (!index) return;
-    index--;
-    if (error_messages[index].text) {
-        free(error_messages[index].text);
-        error_messages[index].text = NULL;
-    }
-}
-
-// Clear all messages from the error_messages array
-void clear_all_messages() {
-    for (int i = 0; i < 256; i++) {
-        clear_message(i);
-    }
-}
-
-// Highlights the whole buffer
-void highlight_buffer(TextBuffer *buffer) {
-    // Clear all messages
-    clear_all_messages();
-
-    // Set syntax highlighting
-    for (int i = 0; i < buffer->num_rows; i++) {
-        for (int j = 0; j < strlen(buffer->rows[i]); j++) {
-            // Get the character at position j in row i
-            char c = buffer->rows[i][j];
-            // Get the code buffer character attributes for this position
-            CodeBufferCharAttributes attr = buffer->code_buffer->attributes[i][j];
-            // Set the syntax highlighting for this character
-            buffer->row_syntax[i][j] = cb_nodetype_to_highlight(attr.token_type);
-        }
-    }
 }
 
 // Function to create the source code char* from the TextBuffer rows
@@ -276,12 +231,6 @@ void load_file(TextBuffer *buffer, const char *filename) {
         buffer->rows = malloc(sizeof(char*));
         buffer->rows[0] = malloc(1);
         buffer->rows[0][0] = '\0';
-        buffer->row_syntax = malloc(sizeof(char*));
-        buffer->row_syntax[0] = malloc(1);
-        buffer->row_syntax[0][0] = '\0';
-        buffer->message_number = malloc(sizeof(unsigned char*));
-        buffer->message_number[0] = malloc(1);
-        buffer->message_number[0][0] = '\0';
         return;
     }
 
@@ -293,22 +242,6 @@ void load_file(TextBuffer *buffer, const char *filename) {
         buffer->rows = realloc(buffer->rows, sizeof(char*) * (buffer->num_rows + 1));
         line[strcspn(line, "\n")] = '\0';  // Remove newline character
         buffer->rows[buffer->num_rows] = strdup(line);
-
-        // Syntax highlighting - all characters are PAIR_BODY by default
-        buffer->row_syntax = realloc(buffer->row_syntax, sizeof(char*) * (buffer->num_rows + 1));
-        buffer->row_syntax[buffer->num_rows] = malloc(strlen(line) + 1);
-        for (int i = 0; i < strlen(line); i++) {
-            buffer->row_syntax[buffer->num_rows][i] = PAIR_BODY;
-        }
-        buffer->row_syntax[buffer->num_rows][strlen(line)] = '\0';
-
-        // Message highlighting - all characters are 0 by default
-        buffer->message_number = realloc(buffer->message_number, sizeof(unsigned char*) * (buffer->num_rows + 1));
-        buffer->message_number[buffer->num_rows] = malloc(strlen(line) + 1);
-        for (int i = 0; i < strlen(line); i++) {
-            buffer->message_number[buffer->num_rows][i] = '\0';
-        }
-        buffer->message_number[buffer->num_rows][strlen(line)] = '\0';
 
         buffer->num_rows++;
     }
@@ -323,8 +256,6 @@ void load_file(TextBuffer *buffer, const char *filename) {
     InitialLoad *initial = create_initial_load(loaded_filename, source_code);
     load_initial_content(buffer->code_buffer, initial);
     free(source_code); // Free the source code string
-
-    highlight_buffer(buffer); // Highlight the buffer (from the SDL highlighter output)
 }
 
 void save_file(TextBuffer *buffer, const char *filename) {
@@ -341,20 +272,13 @@ void save_file(TextBuffer *buffer, const char *filename) {
 void free_buffer(TextBuffer *buffer) {
     for (int i = 0; i < buffer->num_rows; i++) {
         free(buffer->rows[i]);
-        free(buffer->row_syntax[i]);
-        free(buffer->message_number[i]);
     }
     free(buffer->rows);
-    free(buffer->row_syntax);
-    free(buffer->message_number);
-    clear_all_messages();
 }
 
 void editor_refresh(TextBuffer *buffer, int cursor_x, int cursor_y) {
-    char line[MAX_LINE_LENGTH];
-    char syntax[MAX_LINE_LENGTH];
-    clear();
     int max_y, max_x;
+    clear();
     getmaxyx(stdscr, max_y, max_x);
 
     // Scroll position if necessary - line
@@ -382,17 +306,13 @@ void editor_refresh(TextBuffer *buffer, int cursor_x, int cursor_y) {
     // Body
     attron(COLOR_PAIR(PAIR_BODY));
     for (int i = 0; i < buffer->num_rows && i < max_y - 3; i++) {
-        // copy the buffer to the line taking into account the scroll position
-        memcpy(line, buffer->rows[i + scroll_line] + scroll_col, max_x);
-        line[max_x] = '\0';
-        memcpy(syntax, (char*)buffer->row_syntax[i + scroll_line] + scroll_col, max_x);
-        syntax[max_x] = '\0';
         // Position cursor at the beginning of the line
         move(i + 1, 0);
         // print the line with syntax highlighting
         for (int j = 0; j < max_x; j++) {
-            if (line[j] == '\0') break;
-            int highlight = (int)syntax[j];
+            char ch = buffer->rows[i + scroll_line][j + scroll_col];
+            if (ch == '\0') break;
+            int highlight = cb_nodetype_to_highlight(buffer->code_buffer->lines[i + scroll_line].characters[j + scroll_col]);
             int colour = highlight & 0x0f;
             int underline = highlight & ATTR_UNDERLINE;
             int bold = highlight & ATTR_BOLD;
@@ -405,39 +325,59 @@ void editor_refresh(TextBuffer *buffer, int cursor_x, int cursor_y) {
             if (italic) attr |= A_ITALIC;
             if (dim) attr |= A_DIM;
             attron(attr);
-            addch(line[j]);
+            addch(ch);
             attroff(attr);
         }
-        // Clear the rest of the line
-        attron(COLOR_PAIR(PAIR_BODY));
-        for (int j = (int)strlen(line); j < max_x; j++) {
-            addch(' ');
-        }
-
     }
 
-    // Get the message number where the cursor is currently
-    unsigned char message_number = buffer->message_number[cursor_y + scroll_line][cursor_x + scroll_col];
+    // Get the message where the cursor is currently
+    char severity = buffer->code_buffer->lines[cursor_y + scroll_line].characters[cursor_x + scroll_col].severity;
+    char* message = 0;
+    CB_Node *node = buffer->code_buffer->lines[cursor_y + scroll_line].characters[cursor_x + scroll_col].node;
+    if (node) {
+        message = node->message;
+    }
 
     // Footer
     attron(COLOR_PAIR(PAIR_FOOTER));
-    // Make the whole of the header the same colour
+    // Make the whole of the footer the same colour
     // Move to the last line
     move(max_y - 1, 0);
     for (int i = 0; i < max_x; i++) {
         addch(' ');
     }
     mvprintw(max_y - 1, 0, "%s  ", FOOTER_TEXT);
-    if (message_number) {
-        int severity = error_messages[message_number - 1].severity;
-        if (severity == SEVERITY_INFO) {
-            attron(COLOR_PAIR(PAIR_INFOMESSAGE));
-        } else if (severity == SEVERITY_WARNING) {
-            attron(COLOR_PAIR(PAIR_WARNINGMESSAGE));
-        } else {
-            attron(COLOR_PAIR(PAIR_ERRORMESSAGE));
+    if (message) {
+        switch (severity) {
+            case CB_ERROR:
+                attron(COLOR_PAIR(PAIR_ERRORMESSAGE));
+                break;
+            case CB_WARNING:
+                attron(COLOR_PAIR(PAIR_WARNINGMESSAGE));
+                break;
+            default:
+                attron(COLOR_PAIR(PAIR_INFOMESSAGE));
         }
-        printw("[%s]", error_messages[message_number - 1].text);
+        // Calculate the max message length om the screen
+        int message_length = (int)strlen(message);
+        if (message_length > max_x - 2) {
+            message_length = max_x - 2; // Leave space for the brackets
+        }
+        // Print the message (message_length)
+        addch('[');
+        for (int i = 0; i < message_length; i++) {
+            addch(message[i]);
+        }
+        addch(']');
+        // How many characters are left on the line?
+        int remaining_length = max_x - 2 - message_length;
+        if (remaining_length) {
+            // Fill the rest of the line with spaces
+            attron(COLOR_PAIR(PAIR_FOOTER));
+            for (int i = 0; i < remaining_length; i++) {
+                addch(' ');
+            }
+        }
     }
 
     // Cursor
@@ -470,21 +410,6 @@ void insert_char(TextBuffer *buffer, int x, int y, int c) {
     txn.content = content;
 
     editor_apply_transaction(cb, txn);
-/*
-    // Syntax highlighting - all characters are the same as the previous character by default
-    unsigned char *syntax = buffer->row_syntax[y];
-    syntax = realloc(syntax, len + 2);
-    memmove(&syntax[x + 1], &syntax[x], len - x + 1);
-    syntax[x] = syntax[x - 1];
-    buffer->row_syntax[y] = syntax;
-
-    // Message highlighting - all characters are the same as the previous character by default
-    unsigned char *message_number = buffer->message_number[y];
-    message_number = realloc(message_number, len + 2);
-    memmove(&message_number[x + 1], &message_number[x], len - x + 1);
-    message_number[x] = message_number[x - 1];
-    buffer->message_number[y] = message_number;
-*/
 }
 
 void delete_char(TextBuffer *buffer, int x, int y) {
@@ -494,7 +419,6 @@ void delete_char(TextBuffer *buffer, int x, int y) {
     if (x <= 0 || x > len) return;
 
     memmove(&row[x - 1], &row[x], len - x + 1);
-    memmove(&buffer->row_syntax[y][x - 1], &buffer->row_syntax[y][x], len - x + 1);
 
     /* Apply DSL Highlighter Transaction */
     CodeBuffer *cb = buffer->code_buffer;
@@ -506,18 +430,98 @@ void delete_char(TextBuffer *buffer, int x, int y) {
     txn.count = 1; // Delete one character
     txn.content = NULL; // No content for delete transaction
     editor_apply_transaction(cb, txn);
-/*
-    // Decide if the message should be deleted - if the message number is different from the previous and the next
-    // character's message number, then delete it
-    unsigned char message_number = buffer->message_number[y][x - 1];
-    unsigned char prev_message_number = (x > 1) ? buffer->message_number[y][x - 2] : 0;
-    unsigned char next_message_number = (x < len) ? buffer->message_number[y][x] : 0;
-    if (message_number != prev_message_number && message_number != next_message_number) {
-        clear_message(message_number);
-    }
-    // Finally, remove the deleted character from the message number array
-    memmove(&buffer->message_number[y][x - 1], &buffer->message_number[y][x], len - x + 1);
-*/
+}
+
+void join_line(TextBuffer *buffer, int y) {
+    if (y <= 0 || y >= buffer->num_rows) return; // Invalid line number
+
+    char *prev_row = buffer->rows[y - 1];
+    char *next_row = buffer->rows[y];
+
+    size_t prev_len = strlen(prev_row);
+    size_t next_len = strlen(next_row);
+
+    // Reallocate the previous row to hold the next row's content
+    prev_row = realloc(prev_row, prev_len + next_len + 1); // +1 for null terminator
+    if (!prev_row) die("realloc");
+
+    // Append the next row to the previous row
+    memcpy(&prev_row[prev_len], next_row, next_len + 1); // +1 for null terminator
+    buffer->rows[y - 1] = prev_row;
+
+    // Free the next row and remove it from the array
+    free(next_row);
+    memmove(&buffer->rows[y], &buffer->rows[y + 1], sizeof(char*) * (buffer->num_rows - y - 1));
+
+    buffer->num_rows--;
+
+    /* Apply DSL Highlighter Transaction */
+    CodeBuffer *cb = buffer->code_buffer;
+    Transaction txn;
+    txn.type = TRANSACTION_JOINLINES;
+    txn.pos_line = y - 1; // Zero-based index
+    txn.pos_col = (int)prev_len; // Position after the last character of the previous line
+    txn.count = 1; // Join one line
+    txn.content = NULL; // No content for join transaction
+    editor_apply_transaction(cb, txn);
+}
+
+void split_line(TextBuffer *buffer, int x, int y) {
+    if (y < 0 || y >= buffer->num_rows) return; // Invalid line number
+    char *row = buffer->rows[y];
+    size_t len = strlen(row);
+    if (x < 0 || x >= len) return; // Invalid column
+
+    // Create a new row for the split
+    char *new_row = strdup(&row[x]);
+    if (!new_row) die("strdup");
+
+    // Truncate the original row
+    row[x] = '\0';
+    buffer->rows[y] = realloc(row, x + 1); // +1 for null terminator
+
+    // Insert the new row into the buffer
+    buffer->rows = realloc(buffer->rows, sizeof(char*) * (buffer->num_rows + 1));
+    memmove(&buffer->rows[y + 2], &buffer->rows[y + 1], sizeof(char*) * (buffer->num_rows - y - 1));
+    buffer->rows[y + 1] = new_row;
+
+    buffer->num_rows++;
+
+    /* Apply DSL Highlighter Transaction */
+    CodeBuffer *cb = buffer->code_buffer;
+    Transaction txn;
+    txn.type = TRANSACTION_SPLITLINE;
+    txn.pos_line = y; // Zero-based index
+    txn.pos_col = x; // Position to split at
+    txn.count = 1; // Split one line
+    txn.content = NULL; // No content for split transaction
+    editor_apply_transaction(cb, txn);
+}
+
+void add_line(TextBuffer *buffer, int y) {
+    if (y < 0 || y > buffer->num_rows) return; // Invalid line number
+
+    // Allocate memory for the new row
+    char *new_row = malloc(1);
+    if (!new_row) die("malloc");
+    new_row[0] = '\0'; // Initialize to empty string
+
+    // Insert the new row into the buffer
+    buffer->rows = realloc(buffer->rows, sizeof(char*) * (buffer->num_rows + 1));
+    memmove(&buffer->rows[y + 1], &buffer->rows[y], sizeof(char*) * (buffer->num_rows - y));
+    buffer->rows[y] = new_row;
+
+    buffer->num_rows++;
+
+    /* Apply DSL Highlighter Transaction */
+    CodeBuffer *cb = buffer->code_buffer;
+    Transaction txn;
+    txn.type = TRANSACTION_ADDLINE;
+    txn.pos_line = y; // Zero-based index
+    txn.pos_col = 0; // Position at the start of the new line
+    txn.count = 1; // Add one line
+    txn.content = NULL; // No content for add line transaction
+    editor_apply_transaction(cb, txn);
 }
 
 int main(int argc, char *argv[]) {
@@ -525,9 +529,6 @@ int main(int argc, char *argv[]) {
         printf("Usage: %s filename\n", argv[0]);
         exit(EXIT_FAILURE);
     }
-
-    // Initialize error messages
-    memset(error_messages, 0, sizeof(error_messages));
 
     // Set up the SDL highlighter - inproc to the toy parser
     editor_init(); // Initialize the editor side of the library
@@ -574,12 +575,12 @@ int main(int argc, char *argv[]) {
 
         if (c == GETCH_EVENT_RAISED) {
             // Handle the event raised by the parser
-            highlight_buffer(&buffer);
-            continue; // Refresh the display after highlighting
+            continue;
         }
         if (c == CTRL_KEY('q')) {
             break;
-        } else if (c == CTRL_KEY('s')) {
+        }
+        if (c == CTRL_KEY('s')) {
             save_file(&buffer, argv[1]);
             mvprintw(LINES - 1, 0, "File saved. Press any key to continue.");
             // Make the rest of the line the same colour
@@ -587,103 +588,67 @@ int main(int argc, char *argv[]) {
                 addch(' ');
             }
             getch();
-        } else if (c == KEY_UP) {
+            continue;
+        }
+        if (c == KEY_UP) {
             if (cursor_y > 0) cursor_y--;
             if (cursor_x > strlen(buffer.rows[cursor_y])) {
-                cursor_x = strlen(buffer.rows[cursor_y]);
+                cursor_x = (int)strlen(buffer.rows[cursor_y]);
             }
-        } else if (c == KEY_DOWN) {
+            continue;
+        }
+        if (c == KEY_DOWN) {
             if (cursor_y < buffer.num_rows - 1) cursor_y++;
             if (cursor_x > strlen(buffer.rows[cursor_y])) {
-                cursor_x = strlen(buffer.rows[cursor_y]);
+                cursor_x = (int)strlen(buffer.rows[cursor_y]);
             }
-        } else if (c == KEY_LEFT) {
+            continue;
+        }
+        if (c == KEY_LEFT) {
             if (cursor_x > 0) {
                 cursor_x--;
             } else if (cursor_y > 0) {
                 cursor_y--;
-                cursor_x = strlen(buffer.rows[cursor_y]);
+                cursor_x = (int)strlen(buffer.rows[cursor_y]);
             }
-        } else if (c == KEY_RIGHT) {
+            continue;
+        }
+        if (c == KEY_RIGHT) {
             if (cursor_x < strlen(buffer.rows[cursor_y])) {
                 cursor_x++;
             } else if (cursor_y < buffer.num_rows - 1) {
                 cursor_y++;
                 cursor_x = 0;
             }
-        } else if (c == KEY_BACKSPACE || c == 127) {
+            continue;
+        }
+        if (c == KEY_BACKSPACE || c == 127) {
             if (cursor_x > 0) {
                 delete_char(&buffer, cursor_x, cursor_y);
                 cursor_x--;
             } else if (cursor_y > 0) {
-                size_t prev_len = strlen(buffer.rows[cursor_y - 1]);
-                size_t next_line_len = strlen(buffer.rows[cursor_y]);
-                buffer.rows[cursor_y - 1] = realloc(buffer.rows[cursor_y - 1], prev_len + next_line_len + 1);
-                strcat(buffer.rows[cursor_y - 1], buffer.rows[cursor_y]);
-                free(buffer.rows[cursor_y]);
-                memmove(&buffer.rows[cursor_y], &buffer.rows[cursor_y + 1], sizeof(char*) * (buffer.num_rows - cursor_y - 1));
-
-                // Syntax highlighting
-                buffer.row_syntax[cursor_y - 1] = realloc(buffer.row_syntax[cursor_y - 1], prev_len + next_line_len + 1);
-                strcat((char*)buffer.row_syntax[cursor_y - 1], (char*)buffer.row_syntax[cursor_y]);
-                free(buffer.row_syntax[cursor_y]);
-                memmove(&buffer.row_syntax[cursor_y], &buffer.row_syntax[cursor_y + 1], sizeof(char*) * (buffer.num_rows - cursor_y - 1));
-
-                // Message highlighting
-                buffer.message_number[cursor_y - 1] = realloc(buffer.message_number[cursor_y - 1], prev_len + next_line_len + 1);
-                memcpy(buffer.message_number[cursor_y - 1] + prev_len, buffer.message_number[cursor_y], next_line_len + 1);
-                free(buffer.message_number[cursor_y]);
-                memmove(&buffer.message_number[cursor_y], &buffer.message_number[cursor_y + 1], sizeof(unsigned char*) * (buffer.num_rows - cursor_y - 1));
-
-                buffer.num_rows--;
+                int new_cursor_x = (int)strlen(buffer.rows[cursor_y - 1]);
+                join_line(&buffer, cursor_y);
+                // Move cursor
                 cursor_y--;
-                cursor_x = prev_len;
+                cursor_x = new_cursor_x;
             }
-            highlight_buffer(&buffer);
-        } else if (c == '\n') {
-            char *current_row = buffer.rows[cursor_y];
-            int len = (int)strlen(current_row);
-
-            char *new_row = strdup(&current_row[cursor_x]);
-            current_row[cursor_x] = '\0';
-            current_row = realloc(current_row, cursor_x + 1);
-            buffer.rows[cursor_y] = current_row;
-
-            buffer.rows = realloc(buffer.rows, sizeof(char*) * (buffer.num_rows + 1));
-            memmove(&buffer.rows[cursor_y + 2], &buffer.rows[cursor_y + 1], sizeof(char*) * (buffer.num_rows - cursor_y - 1));
-            buffer.rows[cursor_y + 1] = new_row;
-
-            // Syntax highlighting
-            unsigned char *current_syntax = buffer.row_syntax[cursor_y];
-            unsigned char *new_syntax = (unsigned char *)strdup((char*)(&current_syntax[cursor_x]));
-            current_syntax[cursor_x] = '\0';
-            current_syntax = realloc(current_syntax, cursor_x + 1);
-            buffer.row_syntax[cursor_y] = current_syntax;
-
-            buffer.row_syntax = realloc(buffer.row_syntax, sizeof(char*) * (buffer.num_rows + 1));
-            memmove(&buffer.row_syntax[cursor_y + 2], &buffer.row_syntax[cursor_y + 1], sizeof(char*) * (buffer.num_rows - cursor_y - 1));
-            buffer.row_syntax[cursor_y + 1] = new_syntax;
-
-            // Message highlighting
-            unsigned char *current_message_number = buffer.message_number[cursor_y];
-            unsigned char *new_message_number = malloc(len - cursor_x + 1);
-            memcpy(new_message_number, &current_message_number[cursor_x], len - cursor_x + 1);
-            memset(&current_message_number[cursor_x], 0, len - cursor_x);
-            current_message_number = realloc(current_message_number, cursor_x + 1);
-            buffer.message_number[cursor_y] = current_message_number;
-
-            buffer.message_number = realloc(buffer.message_number, sizeof(unsigned char*) * (buffer.num_rows + 1));
-            memmove(&buffer.message_number[cursor_y + 2], &buffer.message_number[cursor_y + 1], sizeof(unsigned char*) * (buffer.num_rows - cursor_y - 1));
-            buffer.message_number[cursor_y + 1] = new_message_number;
-
-            buffer.num_rows++;
+            continue;
+        }
+        if (c == '\n') {
+            if (cursor_x == strlen(buffer.rows[cursor_y])) {
+                add_line(&buffer, cursor_y + 1); // Add a new line after the current line
+            }
+            else {
+                split_line(&buffer, cursor_x, cursor_y);
+            }
             cursor_y++;
             cursor_x = 0;
-            highlight_buffer(&buffer);
-        } else if (isprint(c)) {
+            continue;
+        }
+        if (isprint(c)) {
             insert_char(&buffer, cursor_x, cursor_y, c);
             cursor_x++;
-            highlight_buffer(&buffer);
         }
     }
 
@@ -695,6 +660,7 @@ int main(int argc, char *argv[]) {
 
     /* Free the CodeBuffer */
     free_code_buffer(buffer.code_buffer);
+    buffer.code_buffer = 0;
 
     /* Free the parser CodeBuffer */
     free_code_buffer(parser_cb);

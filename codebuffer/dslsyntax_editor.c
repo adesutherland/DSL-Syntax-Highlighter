@@ -21,9 +21,69 @@ void editor_free() {
     destroy_thread_utils();
 }
 
+/* Utility to convert the first line of a null terminated utf8 or ascii string to */
+/* TODO - Does not handle grapheme clusters */
+/* Newline is not included in the output */
+/* Returns 0 on success, 1 on failure (e.g., memory allocation failure) */
+int first_line_utf8_to_line(const char* utf8_string, CodeBufferLine* line) {
+    if (!utf8_string) {
+        return 1; // Handle NULL input
+    }
+
+    // First pass: Calculate the number of UTF-32 code points.
+    size_t utf32_length = 0;
+    const char* temp_utf8_ptr = utf8_string;
+    utf8_int32_t  decoded_code_point; // Variable to hold the decoded code point
+
+    while (*temp_utf8_ptr && *temp_utf8_ptr != '\n') {
+        // utf8codepoint() decodes the next code point and advances the pointer.
+        temp_utf8_ptr = utf8codepoint(temp_utf8_ptr, &decoded_code_point);
+        (void)decoded_code_point; // Suppress unused variable warning if needed
+        utf32_length++;
+    }
+
+    // Allocate memory for the UTF-32 string
+    line->characters = (CodeBufferCharacter*)malloc((utf32_length + 1) * sizeof(CodeBufferCharacter));
+    if (!line) {
+        perror("Failed to allocate memory for CodeBufferLine");
+        return 1; // Indicate allocation failure
+    }
+
+    // Second pass: Decode and copy the UTF-32 code points.
+    size_t utf32_pos = 0;
+    temp_utf8_ptr = utf8_string; // Reset pointer to the beginning
+
+    while (*temp_utf8_ptr && *temp_utf8_ptr != '\n') {
+        // Decode the next code point and store it.
+        temp_utf8_ptr = utf8codepoint(temp_utf8_ptr, &decoded_code_point);
+        line->characters[utf32_pos].character[0] = decoded_code_point;
+        line->characters[utf32_pos].character[1] = 0;
+        line->characters[utf32_pos].codepoints = 1;
+        line->characters[utf32_pos].token_type = LEXER_TOKEN; // Default token type
+        line->characters[utf32_pos].severity = CB_NONE; // Default severity
+        line->characters[utf32_pos].subtree_type = 0; // No subtree type by default
+        line->characters[utf32_pos].subtree_lines = 0; // No subtree lines by default
+        line->characters[utf32_pos].node = NULL; // No parser node by default
+        utf32_pos++;
+    }
+    // "Null-terminate" the line
+    line->characters[utf32_pos].character[0] = 0; // Null-terminate the last character
+    line->characters[utf32_pos].codepoints = 0;
+    line->characters[utf32_pos].token_type = LEXER_WHITESPACE; // The last character is whitespace
+    line->characters[utf32_pos].severity = CB_NONE; // Default severity for the last character
+    line->characters[utf32_pos].subtree_type = 0; // No subtree type for the last character
+    line->characters[utf32_pos].subtree_lines = 0; // No subtree lines for the last character
+    line->characters[utf32_pos].node = NULL; // No parser node for the last character
+
+    // Set the length of the line
+    line->length = utf32_length;
+
+    return 0; // Success
+}
+
 /* Helper Function to Split Content into Lines.
  * content is utf8 or ascii, returned value is utf32 */
-static void split_content_into_lines(char *content, size_t *no_lines, char32_t*** line_contents, size_t** line_lengths) {
+static void split_content_into_lines(char *content, size_t *no_lines, CodeBufferLine** line_contents) {
     size_t lines = 1;
     size_t i;
     size_t length = strlen(content);
@@ -36,16 +96,9 @@ static void split_content_into_lines(char *content, size_t *no_lines, char32_t**
     }
 
     /* Allocate memory for lines */
-    (*line_contents) = (char32_t**)malloc(sizeof(char32_t*) * lines);
+    (*line_contents) = (CodeBufferLine*)malloc(sizeof(CodeBufferLine) * lines);
     if (!(*line_contents)) {
         perror("Failed to allocate memory for lines");
-        exit(EXIT_FAILURE);
-    }
-
-    /* Allocate memory for line lengths */
-    (*line_lengths) = (size_t *)malloc(sizeof(size_t) * lines);
-    if (!(*line_lengths)) {
-        perror("Failed to allocate memory for line lengths");
         exit(EXIT_FAILURE);
     }
 
@@ -54,8 +107,7 @@ static void split_content_into_lines(char *content, size_t *no_lines, char32_t**
     size_t start = 0;
     for (i = 0; i <= length; i++) {
         if (content[i] == '\0' || content[i] == '\n') {
-            char32_t* utf32 = first_line_utf8_to_utf32(content + start, &(*line_lengths)[current_line]);
-            (*line_contents)[current_line] = utf32;
+            first_line_utf8_to_line(content + start, &(*line_contents)[current_line]);
             current_line++;
             start = i + 1;
         }
@@ -83,7 +135,7 @@ InitialLoad* create_initial_load(const char *unique_document_id, const char *con
     }
 
     /* Split content into lines */
-    split_content_into_lines((char*)content, &(initial_load->line_count), &(initial_load->lines), &(initial_load->line_lengths));
+    split_content_into_lines((char*)content, &(initial_load->line_count), &(initial_load->lines));
 
     initial_load->change_version = 0;
 
@@ -175,29 +227,22 @@ static InitialLoad* copy_initial_load(InitialLoad *initial_load) {
         exit(EXIT_FAILURE);
     }
 
-    /* Copy the line lengths */
-    copy->line_lengths = (size_t *)malloc(sizeof(size_t) * initial_load->line_count);
-    if (!copy->line_lengths) {
-        perror("Failed to allocate memory for line lengths copy");
-        exit(EXIT_FAILURE);
-    }
-    memcpy(copy->line_lengths, initial_load->line_lengths, sizeof(size_t) * initial_load->line_count);
-
     /* Copy the lines */
-    copy->lines = (char32_t **)malloc(sizeof(char32_t *) * copy->line_count);
+    copy->lines = (CodeBufferLine *)malloc(sizeof(CodeBufferLine) * copy->line_count);
     if (!copy->lines) {
         perror("Failed to allocate memory for lines copy");
         exit(EXIT_FAILURE);
     }
 
     for (size_t i = 0; i < copy->line_count; i++) {
-        size_t length = initial_load->line_lengths[i];
-        copy->lines[i] = (char32_t *)malloc(sizeof(char32_t) * length);
-        if (!copy->lines[i]) {
+        size_t length = initial_load->lines[i].length;
+        copy->lines[i].characters = (CodeBufferCharacter *)malloc(sizeof(CodeBufferCharacter) * (length + 1));
+        if (!copy->lines[i].characters) {
             perror("Failed to allocate memory for line copy");
             exit(EXIT_FAILURE);
         }
-        memcpy(copy->lines[i], initial_load->lines[i], sizeof(char32_t) * length);
+        memcpy(copy->lines[i].characters, initial_load->lines[i].characters, sizeof(CodeBufferCharacter) * (length + 1));
+        copy->lines[i].length = length;
     }
 
     return copy;

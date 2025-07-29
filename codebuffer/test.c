@@ -221,22 +221,22 @@ void print_code_buffer_with_attributes(CodeBuffer *cb) {
     // Print the escape code for the default token
     printf("%s",attribute_to_ansi_escape(last_type));
     for (i = 0; i < cb->line_count; i++) {
-        for (j = 0; j < cb->line_lengths[i]; j++) {
+        for (j = 0; j < cb->lines[i].length; j++) {
             // Print the escape code for the token
-            if (cb->attributes && (cb->attributes[i][j].token_type != last_type || cb->attributes[i][j].severity != last_severity)) {
-                last_type = cb->attributes[i][j].token_type;
-                last_severity = cb->attributes[i][j].severity;
+            if (cb->lines[i].characters[j].token_type != last_type || cb->lines[i].characters[j].severity != last_severity) {
+                last_type = cb->lines[i].characters[j].token_type;
+                last_severity = cb->lines[i].characters[j].severity;
                 printf("%s%s",severity_to_ansi_escape(last_severity), attribute_to_ansi_escape(last_type));
             }
             // Print the character
-            // Us the utf32 character invalid or unprintable
-            if (cb->lines[i][j] < 32 || cb->lines[i][j] > 126) {
+            // Is the utf32 character invalid or unprintable
+            if (cb->lines[i].characters[j].character[0] < 32 || cb->lines[i].characters[j].character[0] > 126) {
                 // Print a placeholder for unprintable characters
                 utf8_char[0] = '?';
                 utf8_char[1] = 0;
             } else {
                 // Convert the utf32 character to utf8
-                size_t s = utf32_to_utf8_char(cb->lines[i][j], utf8_char, sizeof(utf8_char));
+                size_t s = utf32_to_utf8_char(cb->lines[i].characters[j].character[0], utf8_char, sizeof(utf8_char));
                 utf8_char[s] = 0; // Null-terminate the string
             }
             printf("%s", utf8_char);

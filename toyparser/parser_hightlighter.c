@@ -130,7 +130,7 @@ static CB_NodeType map_parser_to_token_type(ParserTokenType type) {
 /* The callback function to generate/lookup missing tokens based on position and length */
 /* This function should return a CB_Node for the given position and length, or null if no token is available */
 /* The length of the returned token should be the same or less than the requested length */
-CB_Node ast_get_token_callback(__attribute__((unused)) void *user_data, size_t pos, size_t length, __attribute__((unused))unsigned int* token_chars) {
+CB_Node ast_get_token_callback(__attribute__((unused)) void *user_data, size_t pos, size_t length, __attribute__((unused))CodeBufferCharacter* token_chars) {
     /* Get the token at the given position */
     ParserToken* parser_token = get_token_by_pos(pos);
     if (parser_token->type == PARSER_TOKEN_EOF) {
@@ -189,7 +189,7 @@ void ast_to_token_buffer_worker(ASTNode *node, CB_ParseTree *tb) { // NOLINT(mis
 
     if (tree_type != LEXER_UNKNOWN) {
         // Add AST Tree
-        CB_Node tree = cb_create_node(tree_type, -1, 0);
+        CB_Node tree = cb_create_node(tree_type, 0, 0);
         cb_add_child_node(tb, tree);
         cb_set_current_parent_to_last_node(tb);
     }

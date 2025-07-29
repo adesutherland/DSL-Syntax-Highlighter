@@ -374,7 +374,7 @@ void cb_order_tree(CB_ParseTree *tb) {
 /* This function can be used as is - or could be called by a user-defined callback function            */
 /*                                                                                                     */
 /* For a better implementation, users should provide their own callback function                       */
-CB_Node cb_default_get_token_callback(__attribute__((unused))void *user_data, size_t pos, size_t length, char32_t* token_chars) {
+CB_Node cb_default_get_token_callback(__attribute__((unused))void *user_data, size_t pos, size_t length, CodeBufferCharacter * token_chars) {
     if (token_chars == NULL) {
         fprintf(stderr, "PANIC: Invalid token_chars in cb_default_get_token_callback\n");
         exit(1);
@@ -383,7 +383,7 @@ CB_Node cb_default_get_token_callback(__attribute__((unused))void *user_data, si
         fprintf(stderr, "PANIC: Invalid length in cb_default_get_token_callback\n");
         exit(1);
     }
-    if (*token_chars == '\0') {
+    if (token_chars->codepoints == 0) {
         // EOL
         CB_Node node;
         node.type = LEXER_WHITESPACE;
@@ -398,11 +398,11 @@ CB_Node cb_default_get_token_callback(__attribute__((unused))void *user_data, si
         node.sibling = NULL;
         return node;
     }
-    if (utf32_isspace(*token_chars)) {
+    if (utf32_isspace(token_chars->character[0])) {
         // Whitespace
         // Check how many characters are whitespace
         size_t i = 0;
-        while (token_chars[i] != '\0' && utf32_isspace(token_chars[i])) {
+        while (token_chars[i].codepoints != 0 && utf32_isspace(token_chars[i].character[0])) {
             i++;
         }
         if (i > length)
@@ -424,11 +424,13 @@ CB_Node cb_default_get_token_callback(__attribute__((unused))void *user_data, si
 
     // Otherwise we assume it's a comment
     // How many trailing whitespace characters are there?
-    size_t i = utf32_strlen(token_chars);
-    if (i > length)
+    size_t i = 0;
+    for (i = 0; token_chars[i].codepoints; i++) {}
+    if (i > length) {
         i = length;
+    }
 
-    while (i > 0 && utf32_isspace(token_chars[i - 1])) {
+    while (i > 0 && utf32_isspace(token_chars[i - 1].character[0])) {
         i--;
     }
 
@@ -479,7 +481,7 @@ static void cb_add_missing_tokens_node(CB_Node *node, __attribute__((unused)) si
         if (gap > 0) {
             /* There is a gap */
             /* Get the text for the gap */
-            char32_t*value = get_code_buffer_part(data->cb, pos, gap, NULL, NULL, NULL);
+            CodeBufferCharacter *value = get_code_buffer_part(data->cb, pos, gap, NULL, NULL, NULL);
             /* call the callback to get the missing token */
             CB_Node missing = data->callback(data->user_data, pos, gap, value);
             /* Set the pos */
@@ -517,7 +519,7 @@ static void cb_add_missing_tokens_node(CB_Node *node, __attribute__((unused)) si
         while (last_gap > 0) {
             /* There is a gap */
             /* Get the text for the gap */
-            char32_t*value = get_code_buffer_part(data->cb, last_pos, last_gap, NULL, NULL, NULL);
+            CodeBufferCharacter *value = get_code_buffer_part(data->cb, last_pos, last_gap, NULL, NULL, NULL);
             /* call the callback to get the missing token */
             CB_Node missing = data->callback(data->user_data, last_pos, last_gap, value);
             /* Set the pos */
@@ -547,7 +549,7 @@ static void cb_add_missing_tokens_node(CB_Node *node, __attribute__((unused)) si
         if (gap > 0) {
             /* There is a gap */
             /* Get the text for the gap */
-            char32_t*value = get_code_buffer_part(data->cb, pos, gap, NULL, NULL, NULL);
+            CodeBufferCharacter *value = get_code_buffer_part(data->cb, pos, gap, NULL, NULL, NULL);
             /* call the callback to get the missing token */
             CB_Node missing = data->callback(data->user_data, pos, gap, value);
             /* Set the pos */
@@ -1101,12 +1103,12 @@ static void highlight_syntax_node(CB_Node *node, __attribute__((unused)) size_t 
     if (node->child != NULL) {
         // If the node has children, we don't highlight it but rather its children (later), we just have
         // to handle tree lines
-        if (cb->attributes[line - 1][col].subtree_type) return; // Already set
+        if (cb->lines[line - 1].characters[col].subtree_type) return; // Already set
         // Calculate how many lines the subtree spans
         int subtree_lines = 1;
         size_t len = node->length;
         // Deduct the rest of the length of the first line
-        if (len > cb->line_lengths[line - 1] - col) len -= cb->line_lengths[line - 1] - col + 1;
+        if (len > cb->lines[line - 1].length - col) len -= cb->lines[line - 1].length - col + 1;
         else len = 0;
         // Now loop through the lines and count how many more lines the subtree spans
         size_t l = line;
@@ -1117,14 +1119,14 @@ static void highlight_syntax_node(CB_Node *node, __attribute__((unused)) size_t 
                 fprintf(stderr, "PANIC: Node spans more lines than the buffer has in highlight_syntax_node (1)\n");
                 exit(1);
             }
-            if (len > cb->line_lengths[l - 1]) {
-                len -= cb->line_lengths[l - 1] + 1; // +1 for the line break
+            if (len > cb->lines[l - 1].length) {
+                len -= cb->lines[l - 1].length + 1; // +1 for the line break
             } else {
                 len = 0; // No more lines to process
             }
         }
-        cb->attributes[line - 1][col].subtree_type = node->type; // Set the subtree type
-        cb->attributes[line - 1][col].subtree_lines = subtree_lines - 1; // Set the number of lines the subtree spans (-1 as the subtree_lines member is zero-based)
+        cb->lines[line - 1].characters[col].subtree_type = node->type; // Set the subtree type
+        cb->lines[line - 1].characters[col].subtree_lines = subtree_lines - 1; // Set the number of lines the subtree spans (-1 as the subtree_lines member is zero-based)
         return;
     }
 
@@ -1135,15 +1137,17 @@ static void highlight_syntax_node(CB_Node *node, __attribute__((unused)) size_t 
     // We need to step through each character in the token and set the attributes and node_lines which might cover multiple lines
     int written = 0;
     // Loop through the lines and set the syntax highlighting and message number
+    int xxx = 0;
     while (written < node->length) {
-        cb->attributes[line - 1][col].token_type = token_type; // Set the token type
-        cb->attributes[line - 1][col].severity = severity; // Set the severity
-        cb->node_lines[line - 1][col] = node; // Set the node line to the current node
+        cb->lines[line - 1].characters[col].token_type = token_type; // Set the token type
+        cb->lines[line - 1].characters[col].severity = severity; // Set the severity
+        cb->lines[line - 1].characters[col].node = node; // Set the node line to the current node
 
         // Increment the col (and check if we need to move to the next line)
         col++;
-        if (col >= cb->line_lengths[line - 1]) {
+        if (col > cb->lines[line - 1].length + 1) {
             // Move to the next line
+            xxx = 1;
             line++;
             col = 0;
             if (line - 1 > cb->line_count) {
@@ -1167,61 +1171,27 @@ void highlight_syntax(CodeBuffer *buffer) {
         exit(1);
     }
 
-    // Store the old attributes for dirty line processing later
-    CodeBufferCharAttributes **old_attributes = buffer->attributes;
-
-    // Malloc new attributes
-    buffer->attributes = (CodeBufferCharAttributes**)malloc(sizeof(CodeBufferCharAttributes*) * buffer->line_count);
+    // Clear attributes
     for (int i = 0; i < buffer->line_count; i++) {
-        buffer->attributes[i] = (CodeBufferCharAttributes*)malloc(sizeof(CodeBufferCharAttributes) * (buffer->line_lengths[i] + 1));
         // Initialize the attributes to default values
-        for (int j = 0; j < buffer->line_lengths[i]; j++) {
-            buffer->attributes[i][j].token_type = 0; // Blank
-            buffer->attributes[i][j].severity = CB_NONE; // Default severity
-            buffer->attributes[i][j].subtree_type = 0; // Blank
-            buffer->attributes[i][j].subtree_lines = 0; // Ignored as subtree_type is 0
+        int j;
+        for (j = 0; j < buffer->lines[i].length; j++) {
+            buffer->lines[i].characters[j].token_type = 0; // Blank
+            buffer->lines[i].characters[j].severity = CB_NONE; // Default severity
+            buffer->lines[i].characters[j].subtree_type = 0; // Blank
+            buffer->lines[i].characters[j].subtree_lines = 0; // Ignored as subtree_type is 0
+            buffer->lines[i].characters[j].node = NULL; // No node associated yet
         }
         // Set the last attribute (line break to whitespace
-        buffer->attributes[i][buffer->line_lengths[i]].token_type = LEXER_WHITESPACE; // The last character is a whitespace
-        buffer->attributes[i][buffer->line_lengths[i]].severity = CB_NONE; // The last character is a whitespace
-        buffer->attributes[i][buffer->line_lengths[i]].subtree_type = 0; // The last character is a whitespace
-        buffer->attributes[i][buffer->line_lengths[i]].subtree_lines = 0; // The last character is a whitespace
-    }
-
-    // Size and zero node_lines
-    buffer->node_lines = (CB_Node***)safe_realloc(buffer->node_lines, sizeof(CB_Node**) * buffer->line_count);
-    for (int i = 0; i < buffer->line_count; i++) {
-        buffer->node_lines[i] = (CB_Node**)safe_realloc(buffer->node_lines[i], (buffer->line_lengths[i] + 1) * sizeof(CB_Node*));
-        // Initialize the node lines to NULL
-        for (int j = 0; j < buffer->line_lengths[i]; j++) {
-            buffer->node_lines[i][j] = NULL; // No node for this character
-        }
+        buffer->lines[i].characters[j].token_type = LEXER_WHITESPACE; // The last character is whitespace
+        buffer->lines[i].characters[j].severity = CB_NONE;
+        buffer->lines[i].characters[j].subtree_type = 0;
+        buffer->lines[i].characters[j].subtree_lines = 0;
+        buffer->lines[i].characters[j].node = NULL; // No node association for the last character
     }
 
     /* Walk through the token buffer and set the syntax highlighting */
     cb_walk_tree_top_down(buffer->parse_tree, highlight_syntax_node, buffer);
-
-    if (old_attributes != NULL) {
-        // Compare the old attributes with the new ones and mark the lines as dirty if they are different
-        for (int i = 0; i < buffer->line_count; i++) {
-            for (int j = 0; j < buffer->line_lengths[i]; j++) {
-                if (buffer->attributes[i][j].token_type != old_attributes[i][j].token_type ||
-                    buffer->attributes[i][j].severity != old_attributes[i][j].severity ||
-                    buffer->attributes[i][j].subtree_type != old_attributes[i][j].subtree_type ||
-                    buffer->attributes[i][j].subtree_lines != old_attributes[i][j].subtree_lines) {
-                    // Mark the line as dirty
-                    buffer->dirty_lines[i] = 1;
-                    break; // No need to check the rest of the line
-                }
-            }
-        }
-
-        // Free the old attributes
-        for (int i = 0; i < buffer->line_count; i++) {
-            free(old_attributes[i]);
-        }
-        free(old_attributes);
-    }
 }
 
 /*
@@ -1239,22 +1209,11 @@ void base_load_initial_content(CodeBuffer *cb, InitialLoad *initial_load) {
     /* Set the lines */
     cb->lines = initial_load->lines;
     cb->line_count = initial_load->line_count;
-    cb->line_lengths = initial_load->line_lengths;
 
     /* Initialize other fields */
     cb->snapshot_number = 0;
     cb->highest_severity = CB_NONE;
-    cb->dirty_lines = (char *)malloc(sizeof(char) * cb->line_count);
-    if (!cb->dirty_lines) {
-        perror("Failed to allocate memory for dirty_lines");
-        exit(EXIT_FAILURE);
-    }
-    for (size_t i = 0; i < cb->line_count; i++) {
-        cb->dirty_lines[i] = 0;
-    }
     cb->parse_tree = NULL;
-    cb->node_lines = NULL;
-    cb->attributes = NULL;
     cb->transactions = NULL;
     cb->transaction_count = 0;
 
@@ -1293,22 +1252,12 @@ void base_parse_buffer(CodeBuffer *cb) {
         size_t total_length = 0;
         for (size_t i = 0; i < cb->line_count; i++) {
             /* Get the line length */
-            size_t len = cb->line_lengths[i];
+            size_t len = cb->lines[i].length;
             total_length += len + 1; // Include the virtual newline character
             CB_Node node = cb_create_node(LEXER_TOKEN, i, len);
             cb_add_child_node(cb->parse_tree, node);
         }
         root.length = total_length;
-
-        /* `Set up blank node_lines */
-        cb->node_lines = (CB_Node***) malloc(sizeof(CB_Node**) * cb->line_count);
-        if (!cb->node_lines) {
-            perror("Failed to allocate memory for node_lines");
-            exit(EXIT_FAILURE);
-        }
-        for (size_t i = 0; i < cb->line_count; i++) {
-            cb->node_lines[i] = (CB_Node**)malloc(sizeof(CB_Node*) * (cb->line_lengths[i] + 1));
-        }
     }
 }
 

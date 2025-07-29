@@ -15,5 +15,5 @@ target_include_directories(tp PRIVATE . ${CMAKE_SOURCE_DIR}/codebuffer)
 target_link_libraries(tp highlighter)
 
 # Link codebuffer to the parser
-target_link_libraries(tp code_buffer)
+target_link_libraries(tp dslsyntax_parser)
 

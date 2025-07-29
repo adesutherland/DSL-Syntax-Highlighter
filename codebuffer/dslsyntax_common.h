@@ -241,49 +241,61 @@ typedef void (*ParserFunction)(struct CodeBuffer *cb);
  * These are designed to assist an editor in providing fast access for
  * syntax highlighting and error messages. An editor can then access
  * the parser node for full details if need be */
-typedef struct CodeBufferCharAttributes {
-    char token_type;   // gcoded as char - used to determine highlighting
-    char severity;     // CB_Severity coded as char - indicates is a message is associated with the character
-    char subtree_type; // CB_NodeType coded as char - indicates if the character starts a parse tree, an editor might use this for code folding
+typedef struct CodeBufferCharacter {
+    char32_t character[4];       // The character itself, stored as upto 4 UTF-32 codepoints
+    char32_t *heap_character;    // Pointer to the heap-allocated character, if needed
+    size_t codepoints;           // Number of codepoints in the character
+    char token_type;             // CB_NodeType coded as char - used to determine highlighting
+    char severity;               // CB_Severity coded as char - indicates is a message is associated with the character
+    char subtree_type;           // CB_NodeType coded as char - indicates if the character starts a parse tree, an editor might use this for code folding
     unsigned char subtree_lines; // Number of lines in the subtree - used for code folding
                                  // This is zero-based, so 0 means 1 line.
                                  // 255 means 256 lines or more.
                                  // An editor is expected to use this to indicate folding options visually
                                  // but will likely need to use the parse tree to get the full details
-} CodeBufferCharAttributes;
+    CB_Node *node;               // Pointer to the parse tree node for this character
+                                 // This is used for fast access to the parse tree node for syntax highlighting and error messages
+                                 // Editors should not store this pointer as it may change when the parse tree is updated
+} CodeBufferCharacter;
+
+/* Structure for a line of characters (null terminated) with a line length */
+typedef struct CodeBufferLine {
+    CodeBufferCharacter *characters; // Array of characters in the line
+                                     // Each line is a null-terminated array of CodeBufferCharacter.
+                                     // This allows for fast access to the characters in the code buffer.
+                                     // The first character in each line is the first character of the line.
+                                     // The last character in each line is the newline character (if present).
+                                     // Lines are not guaranteed to be null-terminated, but they are expected to be.
+                                     // Character boundaries (e.g. Unicode glyphs) are determined by the editor and
+                                     // parser
+    size_t length;                   // Length of the line (excluding the null terminator)
+} CodeBufferLine;
 
 /* Structure of the main shared code buffer, synced between editor and parser */
 typedef struct CodeBuffer {
-    // Communication Functions - injected by the editor or parser
-    CommunicationFunctions *communication_functions;
-    ParserFunction parser_function; // Function to parse the code buffer
     // Header
     char *unique_document_id;
-    size_t line_count;    // The number of lines in the code buffer
-    char32_t**lines;      // Array of strings representing the lines of the code. 32-bit characters - UTF
-                          // Character boundaries (e.g. Unicode glyphs) are handled by the editor and
-                          // parser and not processed here. This means that positions are in codepoint but not always characters.
-    size_t *line_lengths; // Array of integers representing the lengths of each line in the code buffer
-    size_t change_version;   // Version number of the document
-    char *dirty_lines;    // Array of chars indicating which lines are dirty as a result of the last transaction
+    size_t change_version;           // Version number of the document
+
+    // Contents
+    size_t line_count;               // The number of lines in the code buffer
+    CodeBufferLine *lines;           // Array of lines
 
     // Parse Result - most recent version
-    CB_ParseTree *parse_tree;  // Pointer to the parse tree
-    CodeBufferCharAttributes **attributes; // Pointer to an array of token lines - each 'character' is an attribute
-    CB_Node ***node_lines;      // Pointer to an array of node lines - each 'character' is a node pointer
-                                // Editors should note that the pointers are not stable,
-                                // pointers should be used to access the parse tree for full details, but
-                                // editors should not store the pointers as they will change
+    CB_ParseTree *parse_tree;        // Pointer to the parse tree
     CB_Severity highest_severity;
 
     // Snapshot information
-    int snapshot_number;     // The change version of the snapshot
-    size_t snapshot_line_count; // The line count at the last snapshot
-    size_t *snapshot_line_lengths; // The line lengths at the last snapshot
-    char32_t**snapshot_lines;  // The lines at the last snapshot
+    int snapshot_number;             // The change version of the snapshot
+    size_t snapshot_line_count;      // The line count at the last snapshot
+    CodeBufferLine *snapshot_lines;  // The lines at the last snapshot
 
-    Transaction *transactions;  // Transactions applied after the last snapshot
+    Transaction *transactions;       // Transactions applied after the last snapshot
     size_t transaction_count;
+
+    // Communication Functions - injected by the editor or parser
+    CommunicationFunctions *communication_functions;
+    ParserFunction parser_function;  // Function to parse the code buffer
 } CodeBuffer;
 
 /* Messages sent between the parser and editor */
@@ -292,8 +304,7 @@ typedef struct CodeBuffer {
 typedef struct InitialLoad {
     char *unique_document_id;
     size_t change_version;
-    char32_t**lines;
-    size_t *line_lengths;
+    CodeBufferLine *lines;
     size_t line_count;
 } InitialLoad;
 
@@ -389,11 +400,6 @@ char* utf32_to_ascii(const char32_t*utf32, size_t length);
  * `length` is set to the length of the returned utf32 string */
 char32_t* utf8_to_utf32(const char *utf8, size_t *length);
 
-/* Utility to convert the first line of a null terminated utf8 or ascii string to utf32
- * length is set to the length of the returned utf32 string
- * Newline is not included in the output */
-char32_t* first_line_utf8_to_utf32(const char *utf8, size_t *length);
-
 /* Function to create a new CodeBuffer */
 CodeBuffer* create_code_buffer(CommunicationFunctions *comm, ParserFunction parser_function);
 
@@ -417,12 +423,13 @@ void free_code_buffer(CodeBuffer *cb);
 // Function to return part of the code buffer based on the buffer position and length.
 // It also sets the `line` and `col` position of the buffer (if they are not null, in which case they are ignored).
 // If `value` is not NULL, it will set the value to the part of the buffer (caller must free() it) in utf8.
-// Returns NULL if the buffer position is out of bounds, otherwise it returns a pointer into the buffer (not malloced) in utf32.
+// Returns NULL if the buffer position is out of bounds, otherwise it returns a pointer into the buffer (utf32), not malloc'd
+// and as part of the CodeBufferLine structure ends at the end of the line.
 // Note this function and the library in general exclude newline characters from the buffer, meaning
 // they are not included in the length of the buffer or buffer position calculations.
 // If the col and length are greater than the line length, it will return the line from the col position to the end of the line.
 // In general, it is preferred that parsers split tokens on newline characters so that tokens don't span multiple lines.
-char32_t* get_code_buffer_part(CodeBuffer *cb, size_t pos, size_t length, size_t *line, size_t *col, char** value);
+CodeBufferCharacter* get_code_buffer_part(CodeBuffer *cb, size_t pos, size_t length, size_t *line, size_t *col, char** value);
 
 // Get code buffer total length (including a newline (0x0A) between each line)
 size_t get_code_buffer_length(CodeBuffer *cb);
@@ -513,7 +520,7 @@ void cb_order_tree(CB_ParseTree *tb);
  *
  * THIS FUNCTION MUST RETURN A TOKEN OF LENGTH 1 OR MORE - OTHERWISE PANIC WITH EXIT 1
  */
-typedef CB_Node (*CB_GetTokenCallback)(void *user_data, size_t pos, size_t length, char32_t* token_chars);
+typedef CB_Node (*CB_GetTokenCallback)(void *user_data, size_t pos, size_t length, CodeBufferCharacter* token_chars);
 
 /* Default callback function to generate/lookup missing tokens based on position and length            */
 /* This function just returns a LEXER_WHITESPACE, LEXER_EOF, or LEXER_COMMENT tokens                   */
@@ -521,7 +528,7 @@ typedef CB_Node (*CB_GetTokenCallback)(void *user_data, size_t pos, size_t lengt
 /* This function can be used as is - or could be called by a user-defined callback function            */
 /*                                                                                                     */
 /* For a better implementation, users should provide their own callback function                       */
-CB_Node cb_default_get_token_callback(void *user_data, size_t pos, size_t length, char32_t* token_chars);
+CB_Node cb_default_get_token_callback(void *user_data, size_t pos, size_t length, CodeBufferCharacter* token_chars);
 
 /*
  * Function to add missing tokens to the CB_ParseTree using a callback function to access or perhaps generate

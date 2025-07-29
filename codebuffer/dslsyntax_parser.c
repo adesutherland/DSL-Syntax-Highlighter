@@ -9,7 +9,7 @@
 
 /*
  * Load the Initial Content
- * This function sets the server/parser CodeBuffer object, and parses it.
+ * This function sets the server/parser CodeBuffer object and parses it.
  * It frees the initial load after setting the code buffer.
  */
 void parser_load_initial_content(CodeBuffer *cb, InitialLoad *initial_load) {
