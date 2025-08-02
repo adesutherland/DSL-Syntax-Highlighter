@@ -64,6 +64,10 @@ CommunicationFunctions *sdlhighlighter = NULL;
 // For the file name
 char loaded_filename[256];
 
+// Screen Size
+int max_y = 0;
+int max_x = 0;
+
 // Scroll position - line and column
 int scroll_line = 0;
 int scroll_col = 0;
@@ -277,8 +281,7 @@ void free_buffer(TextBuffer *buffer) {
 }
 
 void editor_refresh(TextBuffer *buffer, int cursor_x, int cursor_y) {
-    int max_y, max_x;
-    clear();
+    //clear();
     getmaxyx(stdscr, max_y, max_x);
 
     // Scroll position if necessary - line
@@ -304,12 +307,14 @@ void editor_refresh(TextBuffer *buffer, int cursor_x, int cursor_y) {
     }
 
     // Body
+    int i, j;
+    int last_attr = -1; // To track the last attribute used
     attron(COLOR_PAIR(PAIR_BODY));
-    for (int i = 0; i < buffer->num_rows && i < max_y - 3; i++) {
+    for (i = 0; i + scroll_line < buffer->num_rows && i < max_y - 2; i++) {
         // Position cursor at the beginning of the line
         move(i + 1, 0);
         // print the line with syntax highlighting
-        for (int j = 0; j < max_x; j++) {
+        for (j = 0; j < max_x; j++) {
             char ch = buffer->rows[i + scroll_line][j + scroll_col];
             if (ch == '\0') break;
             int highlight = cb_nodetype_to_highlight(buffer->code_buffer->lines[i + scroll_line].characters[j + scroll_col]);
@@ -324,16 +329,37 @@ void editor_refresh(TextBuffer *buffer, int cursor_x, int cursor_y) {
             if (bold) attr |= A_BOLD;
             if (italic) attr |= A_ITALIC;
             if (dim) attr |= A_DIM;
-            attron(attr);
+            if (attr != last_attr) {
+                if (last_attr != -1) {
+                    attroff(last_attr); // Turn off the last attribute
+                }
+                attron(attr); // Turn on the new attribute
+                last_attr = attr; // Update the last attribute
+            }
             addch(ch);
-            attroff(attr);
+        }
+        // Reset Attrinutes
+        if (last_attr != -1) attroff(last_attr); // Turn off the last attribute
+        attron(COLOR_PAIR(PAIR_BODY));
+
+        // Fill the rest of the line with spaces
+        for (; j < max_x; j++) {
+            addch(' ');
+        }
+    }
+
+    // Fill the rest of the body with spaces
+    for (; i < max_y - 2; i++) {
+        move(i + 1, 0);
+        for (j = 0; j < max_x; j++) {
+            addch(' ');
         }
     }
 
     // Get the message where the cursor is currently
-    char severity = buffer->code_buffer->lines[cursor_y + scroll_line].characters[cursor_x + scroll_col].severity;
+    char severity = buffer->code_buffer->lines[cursor_y].characters[cursor_x].severity;
     char* message = 0;
-    CB_Node *node = buffer->code_buffer->lines[cursor_y + scroll_line].characters[cursor_x + scroll_col].node;
+    CB_Node *node = buffer->code_buffer->lines[cursor_y].characters[cursor_x].node;
     if (node) {
         message = node->message;
     }
@@ -343,7 +369,7 @@ void editor_refresh(TextBuffer *buffer, int cursor_x, int cursor_y) {
     // Make the whole of the footer the same colour
     // Move to the last line
     move(max_y - 1, 0);
-    for (int i = 0; i < max_x; i++) {
+    for (j = 0; j < max_x; j++) {
         addch(' ');
     }
     mvprintw(max_y - 1, 0, "%s  ", FOOTER_TEXT);
@@ -363,9 +389,9 @@ void editor_refresh(TextBuffer *buffer, int cursor_x, int cursor_y) {
         if (message_length > max_x - 2) {
             message_length = max_x - 2; // Leave space for the brackets
         }
-        // Print the message (message_length)
+        // Print the message
         addch('[');
-        for (int i = 0; i < message_length; i++) {
+        for (i = 0; i < message_length; i++) {
             addch(message[i]);
         }
         addch(']');
@@ -374,7 +400,7 @@ void editor_refresh(TextBuffer *buffer, int cursor_x, int cursor_y) {
         if (remaining_length) {
             // Fill the rest of the line with spaces
             attron(COLOR_PAIR(PAIR_FOOTER));
-            for (int i = 0; i < remaining_length; i++) {
+            for (i = 0; i < remaining_length; i++) {
                 addch(' ');
             }
         }
@@ -549,9 +575,10 @@ int main(int argc, char *argv[]) {
     raw();
     noecho();
     keypad(stdscr, TRUE);
-    // Start colors
-    start_color();
+    mousemask(ALL_MOUSE_EVENTS | REPORT_MOUSE_POSITION, NULL); // nable all mouse events
+
     // Initialize color pairs
+    start_color(); // Start colors
     init_pair(PAIR_HEADER, COLOR_WHITE, COLOR_BLUE);
     init_pair(PAIR_FOOTER, COLOR_WHITE, COLOR_BLUE);
     init_pair(PAIR_BODY, COLOR_GREEN, COLOR_BLACK);
@@ -590,17 +617,44 @@ int main(int argc, char *argv[]) {
             getch();
             continue;
         }
+        // Handle arrow keys and other special keys
         if (c == KEY_UP) {
-            if (cursor_y > 0) cursor_y--;
-            if (cursor_x > strlen(buffer.rows[cursor_y])) {
-                cursor_x = (int)strlen(buffer.rows[cursor_y]);
+            if (cursor_y > 0) {
+                cursor_y--;
+                if (cursor_x > strlen(buffer.rows[cursor_y])) {
+                    cursor_x = (int)strlen(buffer.rows[cursor_y]);
+                }
+            }
+            continue;
+        }
+        // Page Up
+        if (c == KEY_PPAGE) {
+            if (cursor_y > 0) {
+                cursor_y -= (max_y - 3); // Scroll up by the height of the window minus header/footer
+                if (cursor_y < 0) cursor_y = 0; // Ensure we don't
+                if (cursor_x > strlen(buffer.rows[cursor_y])) {
+                    cursor_x = (int)strlen(buffer.rows[cursor_y]);
+                }
             }
             continue;
         }
         if (c == KEY_DOWN) {
-            if (cursor_y < buffer.num_rows - 1) cursor_y++;
-            if (cursor_x > strlen(buffer.rows[cursor_y])) {
-                cursor_x = (int)strlen(buffer.rows[cursor_y]);
+            if (cursor_y < buffer.num_rows - 1) {
+                cursor_y++;
+                if (cursor_x > strlen(buffer.rows[cursor_y])) {
+                    cursor_x = (int)strlen(buffer.rows[cursor_y]);
+                }
+            }
+            continue;
+        }
+        // Page Down
+        if (c == KEY_NPAGE) {
+            if (cursor_y < buffer.num_rows - 1) {
+                cursor_y += (max_y - 3); // Scroll down by the height of the window minus header/footer
+                if (cursor_y >= buffer.num_rows) cursor_y = buffer.num_rows - 1; // Ensure we don't go out of bounds
+                if (cursor_x > strlen(buffer.rows[cursor_y])) {
+                    cursor_x = (int)strlen(buffer.rows[cursor_y]);
+                }
             }
             continue;
         }
@@ -649,6 +703,25 @@ int main(int argc, char *argv[]) {
         if (isprint(c)) {
             insert_char(&buffer, cursor_x, cursor_y, c);
             cursor_x++;
+            continue;
+        }
+        // Mouse Events
+        if (c == KEY_MOUSE) {
+            MEVENT event;
+            if (getmouse(&event) == OK) {
+                if (event.bstate & BUTTON1_CLICKED) {
+                    // Left click
+                    cursor_x = event.x - scroll_col; // Adjust for scroll
+                    cursor_y = event.y - 1 + scroll_line; // Adjust for scroll and header
+                    if (cursor_x < 0) cursor_x = 0;
+                    if (cursor_y < 0) cursor_y = 0;
+                    if (cursor_y >= buffer.num_rows) cursor_y = buffer.num_rows - 1;
+                    if (cursor_x > (int)strlen(buffer.rows[cursor_y])) {
+                        cursor_x = (int)strlen(buffer.rows[cursor_y]);
+                    }
+                }
+            }
+            continue;
         }
     }
 
@@ -671,7 +744,10 @@ int main(int argc, char *argv[]) {
     /* Free the editor library */
     editor_free();
 
+    // Clean up ncurses
+    clear(); // Clear the screen before exiting
     endwin();
+
     free_buffer(&buffer);
     return 0;
 }

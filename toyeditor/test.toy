@@ -1,5 +1,47 @@
+# This is a comment
 int x = 5;
+
+# This is another comment
 int y;
-y = x + 10;
+a = (1 + 2);
+y = (x + 10) * (m * n) * (a + 5);
+
+say "The value of y is:";
+say x;
+say y;
+
+# This is a comment
+int m = 2;
+int n = 3;
+
+# This is another comment
+int z;
+z = (x + 10) * (m * n) * (a + 5);
+
+say "The value of z is:";
+say z;
+
+say "The value of m is:";
+say m;
+
+say "The value of n is:";
+say n;
+
+# This is a comment
+int w;
+w = (x + 10) * (m * n) * (a + 5) * (z + 1);
+
+say "The value of w is:";
+say w;
+
+say "The value of x is:";
+say x;
+
 say "The value of y is:";
 say y;
+
+say "The value of a is:";
+say a;
+
+say "The value of z is:";
+say z;
