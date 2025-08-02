@@ -73,7 +73,6 @@ void test_print_cb(CodeBuffer *cb, const char *title) {
 void print_delta(Delta *delta, const char *title) {
     printf("%s\n", title ? title : "Delta Information:");
     printf("Change Version: %d\n", (int)delta->change_version);
-    printf("Unique Document ID: %s\n", delta->unique_document_id);
     for (size_t i = 0; i < delta->transaction_count; i++) {
         const char* trans = transaction_type_to_string(delta->transactions[i].type);
         if (delta->transactions[i].content) {

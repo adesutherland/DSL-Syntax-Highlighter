@@ -324,6 +324,8 @@ int launch_parser_thread(ThreadFunctionType start_routine, void *arg) {
     }
 #endif
 
+//    usleep(1000000); // Sleep for debugging - this is to simulate the parser completing before the editor continues
+
     parsing_thread_active = 1; // Set the flag indicating a thread is now active
 
     if (exit_parse_active_critical_section() != 0) {
@@ -332,6 +334,9 @@ int launch_parser_thread(ThreadFunctionType start_routine, void *arg) {
         // This is a potentially problematic state, but the thread is running.
         return -1;
     }
+
+
+//    usleep(1000000); // Sleep for debugging - this is to simulate the parser completing before the editor continues
 
     return 0; // Success
 }

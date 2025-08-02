@@ -676,48 +676,15 @@ Delta* snapshot_and_get_delta(CodeBuffer *cb) {
         exit(EXIT_FAILURE);
     }
 
+    /* Transactions -> Delta */
     delta->change_version = cb->change_version;
-    delta->unique_document_id = strdup(cb->unique_document_id);
-    if (!delta->unique_document_id) {
-        perror("Failed to allocate memory for Delta unique_document_id");
-        exit(EXIT_FAILURE);
-    }
     delta->transaction_count = cb->transaction_count;
-    delta->transactions = (Transaction *)malloc(sizeof(Transaction) * cb->transaction_count);
-    if (!delta->transactions) {
-        perror("Failed to allocate memory for Delta transactions");
-        exit(EXIT_FAILURE);
-    }
-
-    /* Deep copy transactions */
-    for (i = 0; i < cb->transaction_count; i++) {
-        delta->transactions[i].type = cb->transactions[i].type;
-        delta->transactions[i].pos_line = cb->transactions[i].pos_line;
-        delta->transactions[i].pos_col = cb->transactions[i].pos_col;
-        if (cb->transactions[i].content) {
-            delta->transactions[i].content = strdup(cb->transactions[i].content);
-            if (!delta->transactions[i].content) {
-                perror("Failed to allocate memory for Delta transaction content");
-                exit(EXIT_FAILURE);
-            }
-        } else {
-            delta->transactions[i].content = NULL;
-        }
-        delta->transactions[i].count = cb->transactions[i].count;
-    }
-
-    /* Create a snapshot */
-    snapshot(cb);
-
-    /* Reset transactions */
-    for (i = 0; i < cb->transaction_count; i++) {
-        if (cb->transactions[i].content) {
-            free(cb->transactions[i].content);
-        }
-    }
-    free(cb->transactions);
+    delta->transactions = cb->transactions;
     cb->transactions = NULL;
     cb->transaction_count = 0;
+
+    // Create a snapshot
+    snapshot(cb);
 
     return delta;
 }
@@ -731,11 +698,6 @@ void base_replay_delta(CodeBuffer *cb, Delta *delta) {
     if (delta->change_version != cb->change_version + 1) {
         fprintf(stderr, "Sync Error: Document version mismatch - expecting %d found %d\n",
                 (int)(cb->change_version + 1), (int)delta->change_version);
-        return;
-    }
-
-    if (strcmp(delta->unique_document_id, cb->unique_document_id) != 0) {
-        fprintf(stderr, "Sync Error: Document ID mismatch\n");
         return;
     }
 
@@ -754,10 +716,6 @@ void free_delta(Delta *delta) {
     size_t i;
 
     if (!delta) return;
-
-    if (delta->unique_document_id) {
-        free(delta->unique_document_id);
-    }
 
     if (delta->transactions) {
         for (i = 0; i < delta->transaction_count; i++) {

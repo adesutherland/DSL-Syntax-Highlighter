@@ -33,8 +33,8 @@ void toy_parser(CodeBuffer *codeBuffer) {
     // Print the CB_ParseTree
     // cb_print_token_buffer(codeBuffer, tb);
 
-    // sleep to simulate some processing time
-    usleep(1000000); // Sleep for 1000 milliseconds to simulate processing time
+    // For debugging - sleep to simulate some processing time to simulate a slow parser
+//    usleep(1000000); // Sleep for 1000 milliseconds to simulate processing time
 
     codeBuffer->parse_tree = tb; // Set the parse tree in the editor CodeBuffer
 }

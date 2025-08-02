@@ -1137,7 +1137,6 @@ static void highlight_syntax_node(CB_Node *node, __attribute__((unused)) size_t 
     // We need to step through each character in the token and set the attributes and node_lines which might cover multiple lines
     int written = 0;
     // Loop through the lines and set the syntax highlighting and message number
-    int xxx = 0;
     while (written < node->length) {
         cb->lines[line - 1].characters[col].token_type = token_type; // Set the token type
         cb->lines[line - 1].characters[col].severity = severity; // Set the severity
@@ -1145,9 +1144,8 @@ static void highlight_syntax_node(CB_Node *node, __attribute__((unused)) size_t 
 
         // Increment the col (and check if we need to move to the next line)
         col++;
-        if (col > cb->lines[line - 1].length + 1) {
+        if (col > cb->lines[line - 1].length) {
             // Move to the next line
-            xxx = 1;
             line++;
             col = 0;
             if (line - 1 > cb->line_count) {
@@ -1253,8 +1251,8 @@ void base_parse_buffer(CodeBuffer *cb) {
         for (size_t i = 0; i < cb->line_count; i++) {
             /* Get the line length */
             size_t len = cb->lines[i].length;
+            CB_Node node = cb_create_node(LEXER_TOKEN, total_length, len);
             total_length += len + 1; // Include the virtual newline character
-            CB_Node node = cb_create_node(LEXER_TOKEN, i, len);
             cb_add_child_node(cb->parse_tree, node);
         }
         root.length = total_length;

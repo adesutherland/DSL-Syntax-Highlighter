@@ -310,7 +310,6 @@ typedef struct InitialLoad {
 
 /* Transactions applied by the editor to the code buffer since the last parse */
 typedef struct Delta {
-    char *unique_document_id;
     size_t change_version;
     Transaction *transactions;
     size_t transaction_count;
