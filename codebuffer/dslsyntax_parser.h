@@ -16,4 +16,10 @@
  */
 void parser_load_initial_content(CodeBuffer *cb, InitialLoad *initial_load);
 
+/* 
+ * Server Loop for the Parser
+ * This function blocks and handles client connections via sockets.
+ */
+void cb_start_server(CodeBuffer *parser_cb, const char *address, int port);
+
 #endif //DSLSYNTAX_PARSER_H

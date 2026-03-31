@@ -6,6 +6,7 @@
 //
 #include "dslsyntax_common.h"
 #include "dslsyntax_parser.h"
+#include "dslsyntax_log.h"
 
 /*
  * Load the Initial Content
@@ -14,8 +15,8 @@
  */
 void parser_load_initial_content(CodeBuffer *cb, InitialLoad *initial_load) {
     if (!cb || !initial_load) {
-        fprintf(stderr, "Invalid arguments: CodeBuffer or InitialLoad is NULL.\n");
-        exit(EXIT_FAILURE);
+        LOG("parser_load_initial_content: cb or initial_load is NULL");
+        return;
     }
 
     base_load_initial_content(cb, initial_load);

@@ -3,6 +3,7 @@
 #include <unistd.h>
 
 #include "dslsyntax_common.h"
+#include "dslsyntax_log.h"
 
 /* Common / Utility Functions */
 
@@ -134,8 +135,8 @@ char* utf32_to_utf8(const char32_t*utf32, size_t length) {
 
     char *utf8 = (char *)malloc(utf8_length + 1);
     if (!utf8) {
-        perror("Failed to allocate memory for utf8 string");
-        exit(EXIT_FAILURE);
+        LOG("Failed to allocate memory for utf8 string");
+        return NULL;
     }
 
     size_t pos = 0;
@@ -189,8 +190,8 @@ char* line_to_utf8(const CodeBufferLine *line) {
 
     char *utf8 = (char *)malloc(utf8_length + 1);
     if (!utf8) {
-        perror("Failed to allocate memory for utf8 string");
-        exit(EXIT_FAILURE);
+        LOG("Failed to allocate memory for utf8 string");
+        return NULL;
     }
 
     size_t pos = 0;
@@ -226,8 +227,8 @@ char* line_to_utf8(const CodeBufferLine *line) {
 char* utf32_to_ascii(const char32_t*utf32, size_t length) {
     char *ascii = (char *)malloc(length + 1);
     if (!ascii) {
-        perror("Failed to allocate memory for ascii string");
-        exit(EXIT_FAILURE);
+        LOG("Failed to allocate memory for ascii string");
+        return NULL;
     }
 
     for (size_t i = 0; i < length; i++) {
@@ -264,7 +265,7 @@ char32_t* utf8_to_utf32(const char* utf8_string, size_t *length) {
     // Each char32_t is typically 4 bytes.
     char32_t* utf32_string = (char32_t*)malloc((utf32_length + 1) * sizeof(char32_t));
     if (!utf32_string) {
-        perror("Failed to allocate memory for utf32 string");
+        LOG("Failed to allocate memory for utf32 string");
         return NULL; // Indicate allocation failure
     }
 
@@ -287,7 +288,6 @@ char32_t* utf8_to_utf32(const char* utf8_string, size_t *length) {
 }
 
 /* Utility to convert a null terminated utf8 or ascii string to a line*/
-/* TODO - Does not handle grapheme clusters */
 /* Returns 0 on success, 1 on failure (e.g., memory allocation failure) */
 int utf8_to_line(const char* utf8_string, CodeBufferLine *line) {
     if (!utf8_string) {
@@ -310,7 +310,7 @@ int utf8_to_line(const char* utf8_string, CodeBufferLine *line) {
     // Allocate memory for the characters plus null terminator.
     line->characters = (CodeBufferCharacter*)malloc((utf32_length + 1) * sizeof(CodeBufferCharacter));
     if (!line->characters) {
-        perror("Failed to allocate memory for line");
+        LOG("Failed to allocate memory for line");
         return 1; // Indicate allocation failure
     }
 
@@ -323,6 +323,7 @@ int utf8_to_line(const char* utf8_string, CodeBufferLine *line) {
         temp_utf8_ptr = utf8codepoint(temp_utf8_ptr, &decoded_code_point);
         line->characters[utf32_pos].character[0] = decoded_code_point;
         line->characters[utf32_pos].character[1] = 0; // Null-terminate the character
+        line->characters[utf32_pos].heap_character = NULL; // Explicitly NULL
         line->characters[utf32_pos].codepoints = 1; // Set codepoints to 1 for each character
         line->characters[utf32_pos].token_type = LEXER_TOKEN;
         line->characters[utf32_pos].severity = CB_NONE; // Default severity
@@ -334,6 +335,7 @@ int utf8_to_line(const char* utf8_string, CodeBufferLine *line) {
 
     // Null-terminate the UTF-32 string.
     line->characters[utf32_pos].character[0] = 0; // Null-terminate the last character
+    line->characters[utf32_pos].heap_character = NULL; // Explicitly NULL
     line->characters[utf32_pos].codepoints = 0; // Set codepoints to 0 for the null terminator
     line->characters[utf32_pos].token_type = LEXER_WHITESPACE; // The last character is whitespace
     line->characters[utf32_pos].severity = CB_NONE; // Default severity for the last character
@@ -350,18 +352,13 @@ int utf8_to_line(const char* utf8_string, CodeBufferLine *line) {
  * WARNING: Any new memory allocated because of an increasing size is not set to zero.
  */
 void* safe_realloc(void *ptr, size_t size) {
-    void *new_ptr;
-    if (ptr) new_ptr = realloc(ptr, size); // Does not set new memory to zero
-    else {
-        // If ptr is NULL, we need to allocate new memory and set values to zero
-        new_ptr = malloc(size);
-        if (new_ptr) {
-            memset(new_ptr, 0, size); // Initialize the allocated memory to zero
-        }
+    void *new_ptr = realloc(ptr, size);
+    if (!new_ptr && size > 0) {
+        LOG("Failed to reallocate memory of size %zu", size);
+        return NULL;
     }
-    if (!new_ptr) {
-        perror("PANIC: Failed to reallocate memory");
-        exit(EXIT_FAILURE);
+    if (!ptr && new_ptr) {
+        memset(new_ptr, 0, size);
     }
     return new_ptr;
 }
@@ -371,8 +368,8 @@ void* safe_realloc(void *ptr, size_t size) {
 CodeBuffer* create_code_buffer(CommunicationFunctions *comm, ParserFunction parser_function) {
     CodeBuffer *cb = (CodeBuffer *)malloc(sizeof(CodeBuffer));
     if (!cb) {
-        perror("Failed to allocate memory for CodeBuffer");
-        exit(EXIT_FAILURE);
+        LOG("Failed to allocate memory for CodeBuffer");
+        return NULL;
     }
 
     cb->communication_functions = comm;
@@ -403,18 +400,21 @@ void base_apply_transaction(CodeBuffer *cb, Transaction transaction) {
     switch (transaction.type) {
         case TRANSACTION_ADDLINE:
             if (transaction.pos_line > cb->line_count) {
-                fprintf(stderr, "AddLine Error: Line number out of bounds\n");
+                LOG("AddLine Error: Line number %d out of bounds (count=%zu)", transaction.pos_line, cb->line_count);
                 return;
             }
             // Lines
-            cb->lines = (CodeBufferLine*)safe_realloc(cb->lines, sizeof(CodeBufferLine) * (cb->line_count + 1)); // NOLINT(*-suspicious-realloc-usage)
+            CodeBufferLine *new_lines_add = (CodeBufferLine*)safe_realloc(cb->lines, sizeof(CodeBufferLine) * (cb->line_count + 1));
+            if (!new_lines_add) return;
+            cb->lines = new_lines_add;
+
             /* Shift lines down */
             for (size_t i = cb->line_count; i > (size_t)transaction.pos_line; i--) {
                 cb->lines[i] = cb->lines[i - 1];
             }
             if (utf8_to_line(transaction.content, &(cb->lines[transaction.pos_line]))) {
-                fprintf(stderr, "AddLine Error: Failed to convert content to line\n");
-                exit(EXIT_FAILURE);
+                LOG("AddLine Error: Failed to convert content to line");
+                return;
             }
 
             cb->line_count++;
@@ -422,7 +422,7 @@ void base_apply_transaction(CodeBuffer *cb, Transaction transaction) {
 
         case TRANSACTION_DELETELINE:
             if (transaction.pos_line >= cb->line_count) {
-                fprintf(stderr, "DeleteLine Error: Line number out of bounds\n");
+                LOG("DeleteLine Error: Line number %d out of bounds (count=%zu)", transaction.pos_line, cb->line_count);
                 return;
             }
             // Free the line characters being deleted
@@ -434,16 +434,23 @@ void base_apply_transaction(CodeBuffer *cb, Transaction transaction) {
             // Update the line count
             cb->line_count--;
 
-            cb->lines = (CodeBufferLine*)safe_realloc(cb->lines, sizeof(CodeBufferLine) * cb->line_count);
+            if (cb->line_count > 0) {
+                CodeBufferLine *new_lines_del = (CodeBufferLine*)safe_realloc(cb->lines, sizeof(CodeBufferLine) * cb->line_count);
+                if (new_lines_del) cb->lines = new_lines_del;
+                // If it fails, we keep the old larger buffer, which is fine for shrinking
+            } else {
+                free(cb->lines);
+                cb->lines = NULL;
+            }
             break;
 
         case TRANSACTION_ADDCHARS:
             if (transaction.pos_line >= cb->line_count) {
-                fprintf(stderr, "AddChars Error: Line number out of bounds\n");
+                LOG("AddChars Error: Line number %d out of bounds", transaction.pos_line);
                 return;
             }
             if (transaction.pos_col > cb->lines[transaction.pos_line].length) {
-                fprintf(stderr, "AddChars Error: Column number out of bounds\n");
+                LOG("AddChars Error: Column number %d out of bounds", transaction.pos_col);
                 return;
             }
             {
@@ -451,25 +458,54 @@ void base_apply_transaction(CodeBuffer *cb, Transaction transaction) {
                 utf32_content = utf8_to_utf32(transaction.content, &content_len);
                 size_t new_len = len + content_len;
                 cb->lines[transaction.pos_line].length = new_len;
-                // Get the
+                
                 // Update the line
-                cb->lines[transaction.pos_line].characters = (CodeBufferCharacter*)safe_realloc(cb->lines[transaction.pos_line].characters, (new_len + 1) * sizeof(CodeBufferCharacter));
-                // Get the source character for attributes
-                CodeBufferCharacter* attr_char = &cb->lines[transaction.pos_line].characters[transaction.pos_col];
+                CodeBufferCharacter *new_chars = (CodeBufferCharacter*)safe_realloc(cb->lines[transaction.pos_line].characters, (new_len + 1) * sizeof(CodeBufferCharacter));
+                if (!new_chars) return;
+                cb->lines[transaction.pos_line].characters = new_chars;
+                
+                // Get the source character for attributes (safely)
+                CodeBufferCharacter attr_char;
+                if (transaction.pos_col > 0) {
+                    /* Prefer left neighbor for continuation */
+                    attr_char = cb->lines[transaction.pos_line].characters[transaction.pos_col - 1];
+                } else if (transaction.pos_col < len) {
+                    /* Fallback to right neighbor if at start of line */
+                    attr_char = cb->lines[transaction.pos_line].characters[transaction.pos_col];
+                } else {
+                    /* Default for empty line */
+                    attr_char.codepoints = 0;
+                    attr_char.heap_character = NULL;
+                    attr_char.token_type = LEXER_WHITESPACE;
+                    attr_char.severity = CB_NONE;
+                    attr_char.subtree_type = 0;
+                    attr_char.subtree_lines = 0;
+                    attr_char.node = NULL;
+                }
+
                 // Move the existing content after the position
                 memmove(cb->lines[transaction.pos_line].characters + transaction.pos_col + content_len, cb->lines[transaction.pos_line].characters + transaction.pos_col,
                         (len - transaction.pos_col + 1) * sizeof(CodeBufferCharacter));
                 // insert the new content at the position
                 for (size_t i = transaction.pos_col; i < transaction.pos_col + content_len; i++) {
                     CodeBufferCharacter* cb_char = &cb->lines[transaction.pos_line].characters[i];
-                    cb_char->character[0] = utf32_content[i - transaction.pos_col];
+                    char32_t cp = utf32_content[i - transaction.pos_col];
+                    cb_char->character[0] = cp;
                     cb_char->character[1] = 0; // Null-terminate the character
                     cb_char->codepoints = 1; // Set codepoints to 1 for each character
-                    cb_char->token_type = attr_char->token_type;
-                    cb_char->severity = attr_char->severity;
-                    cb_char->subtree_type = attr_char->subtree_type;
-                    cb_char->subtree_lines = attr_char->subtree_lines;
-                    cb_char->node = attr_char->node;
+                    
+                    /* Heuristic: Force whitespace type if character is a space */
+                    if (utf32_isspace(cp)) {
+                        cb_char->token_type = LEXER_WHITESPACE;
+                    } else {
+                        cb_char->token_type = attr_char.token_type;
+                    }
+                    
+                    cb_char->heap_character = NULL; // New character doesn't have heap allocation
+                    cb_char->severity = attr_char.severity;
+                    cb_char->subtree_type = attr_char.subtree_type;
+                    cb_char->subtree_lines = attr_char.subtree_lines;
+                    cb_char->node = attr_char.node;
                 }
                 // Free the utf32_content
                 free(utf32_content);
@@ -478,11 +514,11 @@ void base_apply_transaction(CodeBuffer *cb, Transaction transaction) {
 
         case TRANSACTION_DELETECHARS:
             if (transaction.pos_line >= cb->line_count) {
-                fprintf(stderr, "DeleteChars Error: Line number out of bounds\n");
+                LOG("DeleteChars Error: Line number %d out of bounds", transaction.pos_line);
                 return;
             }
             if (transaction.pos_col + transaction.count > cb->lines[transaction.pos_line].length) {
-                fprintf(stderr, "DeleteChars Error: Column and count out of bounds\n");
+                LOG("DeleteChars Error: Column and count out of bounds");
                 return;
             }
             {
@@ -495,21 +531,30 @@ void base_apply_transaction(CodeBuffer *cb, Transaction transaction) {
                             (len - transaction.pos_col - transaction.count + 1) * sizeof(CodeBufferCharacter));
                 }
                 // Shrink the line
-                cb->lines[transaction.pos_line].characters = (CodeBufferCharacter*)safe_realloc(chars, (new_len + 1) * sizeof(CodeBufferCharacter));
+                CodeBufferCharacter *new_chars = (CodeBufferCharacter*)safe_realloc(chars, (new_len + 1) * sizeof(CodeBufferCharacter));
+                if (new_chars) cb->lines[transaction.pos_line].characters = new_chars;
+                // If it fails, we keep the old larger buffer, which is fine for shrinking
+
                 // Update the line length
                 cb->lines[transaction.pos_line].length = new_len;
             }
             break;
 
         case TRANSACTION_JOINLINES:
-            if (transaction.pos_line <0 || transaction.pos_line >= cb->line_count) {
-                fprintf(stderr, "JoinLines Error: Line number out of bounds\n");
+            if (transaction.pos_line < 0 || transaction.pos_line + 1 >= (int)cb->line_count) {
+                LOG("JoinLines Error: Line number %d out of bounds", transaction.pos_line);
                 return;
             }
             {
                 size_t new_len = cb->lines[transaction.pos_line].length + cb->lines[transaction.pos_line + 1].length;
                 // Update lines
-                cb->lines[transaction.pos_line].characters = (CodeBufferCharacter*)safe_realloc(cb->lines[transaction.pos_line].characters, (new_len + 1) * sizeof(CodeBufferCharacter));
+                CodeBufferCharacter *new_chars = (CodeBufferCharacter*)safe_realloc(cb->lines[transaction.pos_line].characters, (new_len + 1) * sizeof(CodeBufferCharacter));
+                if (!new_chars) {
+                    LOG("JoinLines Error: Failed to reallocate memory for joined line");
+                    return;
+                }
+                cb->lines[transaction.pos_line].characters = new_chars;
+
                 // Move the existing content after the position
                 memmove(cb->lines[transaction.pos_line].characters + cb->lines[transaction.pos_line].length,
                         cb->lines[transaction.pos_line + 1].characters, (cb->lines[transaction.pos_line + 1].length + 1) * sizeof(CodeBufferCharacter));
@@ -530,11 +575,11 @@ void base_apply_transaction(CodeBuffer *cb, Transaction transaction) {
 
         case TRANSACTION_SPLITLINE:
             if (transaction.pos_line >= cb->line_count) {
-                fprintf(stderr, "SplitLine Error: Line number out of bounds\n");
+                LOG("SplitLine Error: Line number %d out of bounds", transaction.pos_line);
                 return;
             }
             if (transaction.pos_col > cb->lines[transaction.pos_line].length) {
-                fprintf(stderr, "SplitLine Error: Column number out of bounds\n");
+                LOG("SplitLine Error: Column number %d out of bounds", transaction.pos_col);
                 return;
             }
             {
@@ -542,7 +587,13 @@ void base_apply_transaction(CodeBuffer *cb, Transaction transaction) {
                 size_t first_part_len = transaction.pos_col;
                 size_t second_part_len = len - transaction.pos_col;
                 // Allocate new lines
-                cb->lines = (CodeBufferLine*)safe_realloc(cb->lines, sizeof(CodeBufferLine) * (cb->line_count + 1));
+                CodeBufferLine *new_lines = (CodeBufferLine*)safe_realloc(cb->lines, sizeof(CodeBufferLine) * (cb->line_count + 1));
+                if (!new_lines) {
+                    LOG("SplitLine Error: Failed to reallocate lines array");
+                    return;
+                }
+                cb->lines = new_lines;
+
                 /* Shift lines down */
                 for (size_t i = cb->line_count; i > (size_t)(transaction.pos_line) + 1; i--) {
                     cb->lines[i] = cb->lines[i - 1];
@@ -552,10 +603,12 @@ void base_apply_transaction(CodeBuffer *cb, Transaction transaction) {
                 // Updates line and line length
                 // Allocate memory for the second line
                 cb->lines[transaction.pos_line + 1].characters = (CodeBufferCharacter*)malloc((second_part_len + 1) * sizeof(CodeBufferCharacter));
-                // Check if memory allocation was successful
                 if (!cb->lines[transaction.pos_line + 1].characters) {
-                    perror("Failed to allocate memory for SplitLine second part");
-                    exit(EXIT_FAILURE);
+                    LOG("Failed to allocate memory for SplitLine second part");
+                    /* We already incremented line_count and shifted, but memory failed. 
+                       This leaves the buffer in an inconsistent state. 
+                       In a real production system we'd rollback, but for now we just return. */
+                    return;
                 }
                 // Copy the second part of the line
                 memcpy(cb->lines[transaction.pos_line + 1].characters, cb->lines[transaction.pos_line].characters + transaction.pos_col, (second_part_len + 1) * sizeof(CodeBufferCharacter));
@@ -576,15 +629,24 @@ void base_apply_transaction(CodeBuffer *cb, Transaction transaction) {
             break;
 
         default:
-            fprintf(stderr, "Unknown Transaction Type\n");
+            LOG("Unknown Transaction Type: %c", transaction.type);
             break;
     }
+
+    /* Call Emergency Parser to update the parse tree structure heuristically */
+    cb_emergency_parse_transaction(cb, transaction);
 }
 
 /* Function to apply a single transaction */
 void editor_apply_transaction(CodeBuffer *cb, Transaction transaction) {
     // Add a transaction to the transaction list
-    cb->transactions = (Transaction *)safe_realloc(cb->transactions, sizeof(Transaction) * (cb->transaction_count + 1));
+    Transaction *new_transactions = (Transaction *)safe_realloc(cb->transactions, sizeof(Transaction) * (cb->transaction_count + 1));
+    if (!new_transactions) {
+        LOG("Failed to reallocate memory for transactions");
+        return;
+    }
+    cb->transactions = new_transactions;
+
     // Deep copy the transaction
     cb->transactions[cb->transaction_count].type = transaction.type;
     cb->transactions[cb->transaction_count].pos_line = transaction.pos_line;
@@ -593,8 +655,8 @@ void editor_apply_transaction(CodeBuffer *cb, Transaction transaction) {
     if (transaction.content) {
         cb->transactions[cb->transaction_count].content = strdup(transaction.content);
         if (!cb->transactions[cb->transaction_count].content) {
-            perror("Failed to allocate memory for Delta transaction content");
-            exit(EXIT_FAILURE);
+            LOG("Failed to allocate memory for Delta transaction content");
+            return;
         }
     } else {
         cb->transactions[cb->transaction_count].content = NULL;
@@ -612,21 +674,28 @@ void snapshot(CodeBuffer *cb) {
 
     if (cb->snapshot_lines) {
         for (i = 0; i < cb->snapshot_line_count; i++) {
-            if (cb->snapshot_lines[i].characters) free(cb->snapshot_lines[i].characters);
+            if (cb->snapshot_lines[i].characters) {
+                for (size_t j = 0; j <= cb->snapshot_lines[i].length; j++) {
+                    if (cb->snapshot_lines[i].characters[j].heap_character) {
+                        free(cb->snapshot_lines[i].characters[j].heap_character);
+                    }
+                }
+                free(cb->snapshot_lines[i].characters);
+            }
         }
         free(cb->snapshot_lines);
     }
     cb->snapshot_lines = (CodeBufferLine*)malloc(sizeof(CodeBufferLine) * cb->line_count);
     if (!cb->snapshot_lines) {
-        perror("Failed to allocate memory for snapshot_lines");
-        exit(EXIT_FAILURE);
+        LOG("Failed to allocate memory for snapshot_lines");
+        return;
     }
 
     for (i = 0; i < cb->line_count; i++) {
         cb->snapshot_lines[i].characters = (CodeBufferCharacter*)malloc(sizeof(CodeBufferCharacter) * (cb->lines[i].length + 1));
         if (!cb->snapshot_lines[i].characters) {
-            perror("Failed to allocate memory for a snapshot line");
-            exit(EXIT_FAILURE);
+            LOG("Failed to allocate memory for a snapshot line");
+            return;
         }
         memcpy(cb->snapshot_lines[i].characters, cb->lines[i].characters, sizeof(CodeBufferCharacter) * (cb->lines[i].length + 1));
         cb->snapshot_lines[i].length = cb->lines[i].length;
@@ -639,14 +708,21 @@ void copy_snapshot_to_codebuffer(CodeBuffer *cb) {
     size_t i;
 
     if (!cb->snapshot_lines || cb->snapshot_line_count == 0) {
-        fprintf(stderr, "No snapshot to copy\n");
+        LOG("No snapshot to copy");
         return;
     }
 
     // Free existing lines
     if (cb->lines) {
         for (i = 0; i < cb->line_count; i++) {
-            if (cb->lines[i].characters) free(cb->lines[i].characters);
+            if (cb->lines[i].characters) {
+                for (size_t j = 0; j <= cb->lines[i].length; j++) {
+                    if (cb->lines[i].characters[j].heap_character) {
+                        free(cb->lines[i].characters[j].heap_character);
+                    }
+                }
+                free(cb->lines[i].characters);
+            }
         }
         free(cb->lines);
     }
@@ -672,8 +748,8 @@ Delta* snapshot_and_get_delta(CodeBuffer *cb) {
     /* Allocate Delta */
     delta = (Delta *)malloc(sizeof(Delta));
     if (!delta) {
-        perror("Failed to allocate memory for Delta");
-        exit(EXIT_FAILURE);
+        LOG("Failed to allocate memory for Delta");
+        return NULL;
     }
 
     /* Transactions -> Delta */
@@ -696,7 +772,7 @@ void base_replay_delta(CodeBuffer *cb, Delta *delta) {
     if (!cb || !delta) return;
 
     if (delta->change_version != cb->change_version + 1) {
-        fprintf(stderr, "Sync Error: Document version mismatch - expecting %d found %d\n",
+        LOG("Sync Error: Document version mismatch - expecting %d found %d",
                 (int)(cb->change_version + 1), (int)delta->change_version);
         return;
     }
@@ -761,7 +837,11 @@ void free_code_buffer(CodeBuffer *cb) {
     // Free lines
     if (cb->lines) {
         for (i = 0; i < cb->line_count; i++) {
-            // TODO - check and free heap characters
+            for (size_t j = 0; j <= cb->lines[i].length; j++) {
+                if (cb->lines[i].characters[j].heap_character) {
+                    free(cb->lines[i].characters[j].heap_character);
+                }
+            }
             free(cb->lines[i].characters);
         }
         free(cb->lines);
@@ -866,8 +946,8 @@ CodeBufferCharacter* get_code_buffer_part(CodeBuffer *cb, size_t pos, size_t len
         // UTF-8 buffer for the value
         *value = (char *)malloc((value_length + 1) * sizeof(char)); // +1 for null terminator
         if (!*value) {
-            perror("Failed to allocate memory for value");
-            exit(EXIT_FAILURE);
+            LOG("Failed to allocate memory for value");
+            return NULL;
         }
 
         /* Now we need to copy the characters from the lines into the value_utf32 buffer */
@@ -950,8 +1030,8 @@ char* get_code_buffer_source(CodeBuffer *cb) {
     size_t total_length = get_code_buffer_utf8_length(cb);
     char *source = (char *)malloc(total_length + 1); // +1 for null terminator
     if (!source) {
-        perror("Failed to allocate memory for code buffer source");
-        exit(EXIT_FAILURE);
+        LOG("Failed to allocate memory for code buffer source");
+        return NULL;
     }
 
     size_t offset = 0;

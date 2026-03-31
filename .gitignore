@@ -52,5 +52,10 @@ Mkfile.old
 dkms.conf
 
 /cmake-build-debug/
+/build/
+/cmake-build-release/
+
+editor.log
+parser.log
 
 /.idea/

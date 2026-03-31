@@ -19,6 +19,8 @@ typedef DWORD (WINAPI *ThreadFunctionType)(LPVOID lpThreadParameter);
 
 #include "dslsyntax_common.h"
 #include "dslsyntax_editor.h"
+#include "serialization.h"
+#include "dslsyntax_log.h"
 #include "parser_highlighter.h" // Toy parser highlighter header
 
 #define CTRL_KEY(k) ((k) & 0x1f)
@@ -162,8 +164,14 @@ int getch_or_parse_event(TextBuffer *buffer) {
 // 6th bit used to indicate whether the token is bold (32)
 // 7th bit used to indicate whether the token is italicized (64)
 // 8th bit used to indicate whether the token is dimmed (128)
+static int highlight_log_count = 0;
+
 static unsigned char cb_nodetype_to_highlight(CodeBufferCharacter attribute) {
     unsigned char highlight;
+    if (highlight_log_count < 50 && attribute.token_type != 0) {
+        LOG("highlight: type=%d, severity=%d", (int)attribute.token_type, (int)attribute.severity);
+        highlight_log_count++;
+    }
     switch (attribute.severity) {
         case CB_ERROR:
             highlight = PAIR_ERRORMESSAGE;
@@ -198,6 +206,11 @@ static unsigned char cb_nodetype_to_highlight(CodeBufferCharacter attribute) {
                     break;
             case LEXER_IDENTIFIER:
                     highlight = PAIR_VARIABLE;
+                    break;
+            case LEXER_TOKEN:
+            case LEXER_WHITESPACE:
+            case LEXER_EOF:
+                    highlight = PAIR_BODY;
                     break;
             case SYNTAX_ERROR:
                     highlight = PAIR_ERROR;
@@ -281,6 +294,8 @@ void free_buffer(TextBuffer *buffer) {
 }
 
 void editor_refresh(TextBuffer *buffer, int cursor_x, int cursor_y) {
+    int max_x, max_y;
+    highlight_log_count = 0;
     //clear();
     getmaxyx(stdscr, max_y, max_x);
 
@@ -317,7 +332,14 @@ void editor_refresh(TextBuffer *buffer, int cursor_x, int cursor_y) {
         for (j = 0; j < max_x; j++) {
             char ch = buffer->rows[i + scroll_line][j + scroll_col];
             if (ch == '\0') break;
-            int highlight = cb_nodetype_to_highlight(buffer->code_buffer->lines[i + scroll_line].characters[j + scroll_col]);
+            
+            int highlight = PAIR_BODY;
+            if (buffer->code_buffer && buffer->code_buffer->lines && (i + scroll_line) < buffer->code_buffer->line_count) {
+                if (j + scroll_col < buffer->code_buffer->lines[i + scroll_line].length) {
+                    highlight = cb_nodetype_to_highlight(buffer->code_buffer->lines[i + scroll_line].characters[j + scroll_col]);
+                }
+            }
+            
             int colour = highlight & 0x0f;
             int underline = highlight & ATTR_UNDERLINE;
             int bold = highlight & ATTR_BOLD;
@@ -357,11 +379,16 @@ void editor_refresh(TextBuffer *buffer, int cursor_x, int cursor_y) {
     }
 
     // Get the message where the cursor is currently
-    char severity = buffer->code_buffer->lines[cursor_y].characters[cursor_x].severity;
+    char severity = CB_NONE;
     char* message = 0;
-    CB_Node *node = buffer->code_buffer->lines[cursor_y].characters[cursor_x].node;
-    if (node) {
-        message = node->message;
+    if (buffer->code_buffer && buffer->code_buffer->lines && cursor_y < buffer->code_buffer->line_count) {
+        if (cursor_x < buffer->code_buffer->lines[cursor_y].length) {
+            severity = buffer->code_buffer->lines[cursor_y].characters[cursor_x].severity;
+            CB_Node *node = buffer->code_buffer->lines[cursor_y].characters[cursor_x].node;
+            if (node) {
+                message = node->message;
+            }
+        }
     }
 
     // Footer
@@ -549,27 +576,35 @@ void add_line(TextBuffer *buffer, int y) {
     txn.content = NULL; // No content for add line transaction
     editor_apply_transaction(cb, txn);
 }
-
 int main(int argc, char *argv[]) {
-    if (argc < 2) {
-        printf("Usage: %s filename\n", argv[0]);
+    char *filename = NULL;
+    int debug = 0;
+
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "-d") == 0) debug = 1;
+        else filename = argv[i];
+    }
+
+    if (!filename) {
+        printf("Usage: %s [-d] filename\n", argv[0]);
         exit(EXIT_FAILURE);
     }
 
-    // Set up the SDL highlighter - inproc to the toy parser
+    if (debug) cb_log_init("editor.log");
+    LOG("Toy Editor starting for file: %s", filename);
+
+    // Set up the SDL highlighter - socket to the toy parser server
     editor_init(); // Initialize the editor side of the library
-    CodeBuffer *parser_cb = create_code_buffer(0, toy_parser); // Create parser CodeBuffer
-    sdlhighlighter = create_inproc_communication_functions(parser_cb); // Create communication endpoint
+    sdlhighlighter = create_socket_communication_functions("127.0.0.1", 8080); // Connect to server
 
     // This takes control for this editor main thread
     if (enter_codeblock_critical_section() != 0) {
         fprintf(stderr, "CRITICAL - Failed to re-enter CS!\n");
         die("Critical section error");
-        /* State is potentially inconsistent. */
     }
 
-    TextBuffer buffer = {0, NULL};
-    load_file(&buffer, argv[1]);
+    TextBuffer buffer = {0, NULL, NULL};
+    load_file(&buffer, filename);
 
     initscr();
     raw();
@@ -581,13 +616,13 @@ int main(int argc, char *argv[]) {
     start_color(); // Start colors
     init_pair(PAIR_HEADER, COLOR_WHITE, COLOR_BLUE);
     init_pair(PAIR_FOOTER, COLOR_WHITE, COLOR_BLUE);
-    init_pair(PAIR_BODY, COLOR_GREEN, COLOR_BLACK);
+    init_pair(PAIR_BODY, COLOR_WHITE, COLOR_BLACK);
     init_pair(PAIR_COMMENT, COLOR_WHITE, COLOR_BLACK);
-    init_pair(PAIR_KEYWORD, COLOR_WHITE, COLOR_BLACK);
+    init_pair(PAIR_KEYWORD, COLOR_CYAN, COLOR_BLACK);
     init_pair(PAIR_STRING, COLOR_YELLOW, COLOR_BLACK);
     init_pair(PAIR_NUM, COLOR_YELLOW, COLOR_BLACK);
     init_pair(PAIR_OPERATOR, COLOR_MAGENTA, COLOR_BLACK);
-    init_pair(PAIR_VARIABLE, COLOR_CYAN, COLOR_BLACK);
+    init_pair(PAIR_VARIABLE, COLOR_GREEN, COLOR_BLACK);
     init_pair(PAIR_ERROR, COLOR_WHITE, COLOR_RED);
     init_pair(PAIR_INFOMESSAGE, COLOR_WHITE, COLOR_GREEN);
     init_pair(PAIR_WARNINGMESSAGE, COLOR_WHITE, COLOR_YELLOW);
@@ -731,18 +766,18 @@ int main(int argc, char *argv[]) {
         die("Critical section error");
     }
 
+    /* Free the editor library - this joins the parser thread if active */
+    editor_free();
+
     /* Free the CodeBuffer */
     free_code_buffer(buffer.code_buffer);
     buffer.code_buffer = 0;
 
-    /* Free the parser CodeBuffer */
-    free_code_buffer(parser_cb);
-
     /* Free the communication functions */
-    free_inproc_communication_functions(sdlhighlighter);
-
-    /* Free the editor library */
-    editor_free();
+    if (sdlhighlighter) {
+        if (sdlhighlighter->comms_data) free(sdlhighlighter->comms_data);
+        free(sdlhighlighter);
+    }
 
     // Clean up ncurses
     clear(); // Clear the screen before exiting

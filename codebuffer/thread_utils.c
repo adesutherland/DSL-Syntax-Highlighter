@@ -1,4 +1,5 @@
 #include "thread_utils.h"
+#include "dslsyntax_log.h"
 #include <string.h> /* For memset, though not strictly C90 but widely available */
 #include <errno.h>  /* For POSIX error numbers with pthreads */
 
@@ -324,8 +325,6 @@ int launch_parser_thread(ThreadFunctionType start_routine, void *arg) {
     }
 #endif
 
-//    usleep(1000000); // Sleep for debugging - this is to simulate the parser completing before the editor continues
-
     parsing_thread_active = 1; // Set the flag indicating a thread is now active
 
     if (exit_parse_active_critical_section() != 0) {
@@ -336,8 +335,7 @@ int launch_parser_thread(ThreadFunctionType start_routine, void *arg) {
     }
 
 
-//    usleep(1000000); // Sleep for debugging - this is to simulate the parser completing before the editor continues
-
+    LOG("launch_parser_thread: thread launched");
     return 0; // Success
 }
 

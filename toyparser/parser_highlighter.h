@@ -9,6 +9,8 @@
 // The actual toy parser function
 void toy_parser(CodeBuffer *codeBuffer);
 
+extern int slow_mode;
+
 /* Library function to initialize the highlighter with this start source code */
 void highlight_init(char* source_code, CodeBuffer **cb, CB_ParseTree **tb);
 

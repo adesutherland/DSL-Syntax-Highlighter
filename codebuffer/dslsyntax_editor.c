@@ -6,24 +6,31 @@
 //
 #include "dslsyntax_common.h"
 #include "dslsyntax_editor.h"
+#include "dslsyntax_log.h"
 
 /* Function to initialise the editor side of the library */
 void editor_init() {
+    LOG("editor_init: starting");
     int rc = init_parser_thread_utils();
     if (rc != 0) {
-        fprintf(stderr, "Failed to initialize thread utils for editor: %d\n", rc);
+        LOG("editor_init: failed to initialize thread utils: %d", rc);
         exit(EXIT_FAILURE);
     }
+    LOG("editor_init: finished");
 }
 
 /* Function to free the editor side of the library */
 void editor_free() {
+    if (editor_is_parsing_thread_active()) {
+        LOG("editor_free: waiting for parser thread to finish");
+        join_parser_thread();
+    }
     destroy_thread_utils();
 }
 
-/* Utility to convert the first line of a null terminated utf8 or ascii string to */
-/* TODO - Does not handle grapheme clusters */
+/* Utility to convert the first line of a null terminated utf8 or ascii string to a line */
 /* Newline is not included in the output */
+
 /* Returns 0 on success, 1 on failure (e.g., memory allocation failure) */
 int first_line_utf8_to_line(const char* utf8_string, CodeBufferLine* line) {
     if (!utf8_string) {
@@ -58,6 +65,7 @@ int first_line_utf8_to_line(const char* utf8_string, CodeBufferLine* line) {
         temp_utf8_ptr = utf8codepoint(temp_utf8_ptr, &decoded_code_point);
         line->characters[utf32_pos].character[0] = decoded_code_point;
         line->characters[utf32_pos].character[1] = 0;
+        line->characters[utf32_pos].heap_character = NULL; // Explicitly NULL
         line->characters[utf32_pos].codepoints = 1;
         line->characters[utf32_pos].token_type = LEXER_TOKEN; // Default token type
         line->characters[utf32_pos].severity = CB_NONE; // Default severity
@@ -68,6 +76,7 @@ int first_line_utf8_to_line(const char* utf8_string, CodeBufferLine* line) {
     }
     // "Null-terminate" the line
     line->characters[utf32_pos].character[0] = 0; // Null-terminate the last character
+    line->characters[utf32_pos].heap_character = NULL; // Explicitly NULL
     line->characters[utf32_pos].codepoints = 0;
     line->characters[utf32_pos].token_type = LEXER_WHITESPACE; // The last character is whitespace
     line->characters[utf32_pos].severity = CB_NONE; // Default severity for the last character
@@ -152,35 +161,36 @@ typedef struct {
 /* Thread that loads the initial content */
 static void* load_initial_content_thread(void *arg) {
     InitialLoadThreadData *data = (InitialLoadThreadData *)arg;
+    LOG("load_initial_content_thread: starting");
 
     /* Send the initial load to the parser */
     CB_ParseTree *result = data->code_buffer->communication_functions->send_initial_load(data->code_buffer->communication_functions, data->initial_load);
-// sleep(2); // Simulate some delay for the parser to process the initial load
+    LOG("load_initial_content_thread: result received from parser");
 
     /* Enter the critical section */
     int rc = enter_codeblock_critical_section();
     if (rc != 0) {
-        fprintf(stderr, "Failed to enter critical section: %d\n", rc);
+        LOG("load_initial_content_thread: failed to enter CS");
         exit(EXIT_FAILURE);
     }
 
     /* Set the parse tree in the code buffer */
     if (data->code_buffer->parse_tree) {
-        /* Free the existing parse tree */
+        cb_clear_node_pointers(data->code_buffer);
         cb_free_token_buffer(data->code_buffer->parse_tree);
     }
     data->code_buffer->parse_tree = result;
 
     if (data->code_buffer->transaction_count > 0) {
-        /* Reset to the snapshot */
         copy_snapshot_to_codebuffer(data->code_buffer);
     }
 
+    LOG("load_initial_content_thread: highlighting syntax");
     highlight_syntax(data->code_buffer);
 
     /* Apply the parse result to the code buffer */
     if (data->code_buffer->transaction_count > 0) {
-        /* Replay the transaction since the snapshot */
+        LOG("load_initial_content_thread: replaying %d transactions", (int)data->code_buffer->transaction_count);
         int i;
         for (i = 0; i < data->code_buffer->transaction_count; i++) {
             base_apply_transaction(data->code_buffer, data->code_buffer->transactions[i]);
@@ -189,20 +199,21 @@ static void* load_initial_content_thread(void *arg) {
 
     // Signal the parse complete event
     rc = raise_parse_complete_event();
-    if (rc != 0) {
-        fprintf(stderr, "Failed to set parse complete event: %d\n", rc);
-        exit(EXIT_FAILURE);
-    }
+    LOG("load_initial_content_thread: parse complete event raised");
 
     /* Exit the critical section */
     rc = exit_codeblock_critical_section();
     if (rc != 0) {
-        fprintf(stderr, "Failed to exit critical section: %d\n", rc);
+        LOG("load_initial_content_thread: failed to exit CS");
         exit(EXIT_FAILURE);
     }
 
     /* Free the arg structure */
+    if (data->initial_load) {
+        free_initial_load(data->initial_load);
+    }
     free(arg);
+    LOG("load_initial_content_thread: finished");
 
     return NULL;
 }
@@ -260,10 +271,11 @@ static InitialLoad* copy_initial_load(InitialLoad *initial_load) {
 void load_initial_content(CodeBuffer *cb, InitialLoad *initial_load) {
     int rc;
     if (!cb) {
-        // Panic
-        fprintf(stderr, "PANIC: CodeBuffer is NULL. Cannot load initial content.\n");
-        exit(EXIT_FAILURE);
+        LOG("load_initial_content: cb is NULL");
+        return;
     }
+
+    LOG("load_initial_content: starting for doc=%s", initial_load->unique_document_id);
 
     /* Enter the critical section */
     rc = enter_codeblock_critical_section();
@@ -299,9 +311,10 @@ void load_initial_content(CodeBuffer *cb, InitialLoad *initial_load) {
     /* Set the thread data */
     arg->code_buffer = cb;
     arg->initial_load = initial_load_copy;
+    LOG("load_initial_content: launching parser thread");
     rc = launch_parser_thread(load_initial_content_thread, arg);
     if (rc != 0) {
-        fprintf(stderr, "Failed to launch thread for initial load: %d\n", rc);
+        LOG("load_initial_content: failed to launch thread");
         exit(EXIT_FAILURE);
     }
 
@@ -309,20 +322,20 @@ void load_initial_content(CodeBuffer *cb, InitialLoad *initial_load) {
      * This sets the local CodeBuffer object, after which the codeblock
      * can be used. It frees the initial load after setting the code buffer.
      */
+    LOG("load_initial_content: calling base_load_initial_content");
     base_load_initial_content(cb, initial_load);
 
     /* Set the snapshot of the content */
+    LOG("load_initial_content: taking snapshot");
     snapshot(cb);
 
     // Highlight the syntax of the editor CodeBuffer
+    LOG("load_initial_content: highlighting syntax");
     highlight_syntax(cb);
 
     /* Exit the critical section */
     rc = exit_codeblock_critical_section();
-    if (rc != 0) {
-        fprintf(stderr, "Failed to exit critical section: %d\n", rc);
-        exit(EXIT_FAILURE);
-    }
+    LOG("load_initial_content: finished");
 }
 
 
@@ -336,14 +349,16 @@ typedef struct {
 /* Thread that processes deltas and parses result */
 static void* process_delta_thread(void *arg) {
     ProcessDeltaThreadData *data = (ProcessDeltaThreadData *)arg;
+    LOG("process_delta_thread: starting");
 
     /* Send the delta to the parser */
     CB_ParseTree *result = data->code_buffer->communication_functions->send_delta(data->code_buffer->communication_functions, data->delta);
+    LOG("process_delta_thread: result received from parser");
 
     /* Enter the critical section */
     int rc = enter_codeblock_critical_section();
     if (rc != 0) {
-        fprintf(stderr, "Failed to enter critical section: %d\n", rc);
+        LOG("process_delta_thread: failed to enter CS");
         exit(EXIT_FAILURE);
     }
 
@@ -355,21 +370,21 @@ static void* process_delta_thread(void *arg) {
 
     /* Set the parse tree in the code buffer */
     if (data->code_buffer->parse_tree) {
-        /* Free the existing parse tree */
+        cb_clear_node_pointers(data->code_buffer);
         cb_free_token_buffer(data->code_buffer->parse_tree);
     }
     data->code_buffer->parse_tree = result;
 
     if (data->code_buffer->transaction_count > 0) {
-        /* Reset to the snapshot */
         copy_snapshot_to_codebuffer(data->code_buffer);
     }
 
+    LOG("process_delta_thread: highlighting syntax");
     highlight_syntax(data->code_buffer);
 
     /* Apply the parse result to the code buffer */
     if (data->code_buffer->transaction_count > 0) {
-        /* Replay the transaction since the snapshot */
+        LOG("process_delta_thread: replaying %d transactions", (int)data->code_buffer->transaction_count);
         int i;
         for (i = 0; i < data->code_buffer->transaction_count; i++) {
             base_apply_transaction(data->code_buffer, data->code_buffer->transactions[i]);
@@ -378,20 +393,18 @@ static void* process_delta_thread(void *arg) {
 
     // Signal the parse complete event
     rc = raise_parse_complete_event();
-    if (rc != 0) {
-        fprintf(stderr, "Failed to set parse complete event: %d\n", rc);
-        exit(EXIT_FAILURE);
-    }
+    LOG("process_delta_thread: parse complete event raised");
 
     /* Exit the critical section */
     rc = exit_codeblock_critical_section();
     if (rc != 0) {
-        fprintf(stderr, "Failed to exit critical section: %d\n", rc);
+        LOG("process_delta_thread: failed to exit CS");
         exit(EXIT_FAILURE);
     }
 
     /* Free the arg structure */
     free(arg);
+    LOG("process_delta_thread: finished");
 
     return NULL;
 }
@@ -405,40 +418,33 @@ static void* process_delta_thread(void *arg) {
 void process_delta(CodeBuffer *cb) {
     int rc;
     if (!cb) {
-        // Panic
-        fprintf(stderr, "PANIC: CodeBuffer is NULL. Cannot load initial content.\n");
-        exit(EXIT_FAILURE);
+        LOG("process_delta: cb is NULL");
+        return;
     }
+
+    LOG("process_delta: starting");
 
     /* Enter the critical section */
     rc = enter_codeblock_critical_section();
     if (rc != 0) {
-        fprintf(stderr, "Failed to enter critical section: %d\n", rc);
+        LOG("process_delta: failed to enter CS");
         exit(EXIT_FAILURE);
     }
 
     if (editor_is_parsing_thread_active()) {
-        // PANIC
-        fprintf(stderr, "PANIC: Parsing thread is already active. Cannot load initial content.\n");
-        exit(EXIT_FAILURE);
+        LOG("process_delta: parsing thread already active, skipping");
+        rc = exit_codeblock_critical_section();
+        return;
     }
 
     // Reset the parse_complete_event
     rc = reset_parse_complete_event();
-    if (rc != 0) {
-        fprintf(stderr, "Failed to reset parse complete event: %d\n", rc);
-        exit(EXIT_FAILURE);
-    }
 
     Delta *delta = snapshot_and_get_delta(cb);
     if (!delta) {
-        fprintf(stderr, "Failed to create delta from code buffer\n");
-        exit(EXIT_FAILURE);
-    }
-    if (delta->transaction_count == 0) {
-        fprintf(stderr, "No transactions to process in delta\n");
-        free_delta(delta);
-        exit(EXIT_FAILURE); // TODO - this is really an acceptable NOP condition
+        LOG("process_delta: no changes to sync");
+        rc = exit_codeblock_critical_section();
+        return;
     }
 
     /* Send the delta */
@@ -453,16 +459,14 @@ void process_delta(CodeBuffer *cb) {
     /* Set the thread data */
     arg->code_buffer = cb;
     arg->delta = delta;
+    LOG("process_delta: launching parser thread");
     rc = launch_parser_thread(process_delta_thread, arg);
     if (rc != 0) {
-        fprintf(stderr, "Failed to launch thread for process_delta: %d\n", rc);
+        LOG("process_delta: failed to launch thread");
         exit(EXIT_FAILURE);
     }
 
     /* Exit the critical section */
     rc = exit_codeblock_critical_section();
-    if (rc != 0) {
-        fprintf(stderr, "Failed to exit critical section: %d\n", rc);
-        exit(EXIT_FAILURE);
-    }
+    LOG("process_delta: finished");
 }

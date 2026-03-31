@@ -4,6 +4,7 @@
 #include <ctype.h>
 
 #include "parser.h"
+#include "dslsyntax_log.h"
 //#include "ast.h"
 
 /* Global variables for simplicity */
@@ -52,6 +53,8 @@ void free_token_list() {
         free(current);
         current = next;
     }
+    head = NULL;
+    tail = NULL;
 }
 
 ParserToken *get_token_by_pos(size_t pos) {

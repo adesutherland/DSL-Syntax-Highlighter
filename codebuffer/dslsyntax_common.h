@@ -183,6 +183,10 @@ typedef enum CB_NodeType {
     PARSE_TREE_FUNCTION,   // Represents functions or methods.
     PARSE_TREE_STRUCTURE,  // Represents higher-level structures like structs
 
+    // *** Tree Navigation Tokens (for serialization/protocol) ***
+    TREE_DOWN = 100,       // Indicates moving down one level in the syntax tree
+    TREE_UP,               // Indicates moving up one level in the syntax tree
+
     // *** Error and Special Tokens ***
     SYNTAX_ERROR = 120,    // Represents a generic error
     INTERNAL_ERROR         // Represents an internal parser error
@@ -395,6 +399,9 @@ char* utf32_to_utf8(const char32_t*utf32, size_t length);
 /* Utility to convert an utf32 string to ascii (invalid characters are replaced with '?') */
 char* utf32_to_ascii(const char32_t*utf32, size_t length);
 
+/* Utility to convert a null terminated utf8 or ascii string to a line*/
+int utf8_to_line(const char* utf8_string, CodeBufferLine *line);
+
 /* Utility to convert a null terminated utf8 or ascii string to utf32
  * `length` is set to the length of the returned utf32 string */
 char32_t* utf8_to_utf32(const char *utf8, size_t *length);
@@ -439,6 +446,9 @@ CB_ParseTree* cb_create_token_buffer();
 
 // Function to free the CB_ParseTree and its nodes
 void cb_free_token_buffer(CB_ParseTree *root);
+
+// Function to clear node pointers in the code buffer
+void cb_clear_node_pointers(CodeBuffer *cb);
 
 // Function to extract the source code from the CodeBuffer in UTF-8 format
 char* get_code_buffer_source(CodeBuffer *cb);
@@ -564,8 +574,13 @@ void cb_validate_tree(CB_ParseTree *tb);
 /* Function to convert CB_NodeType to a string */
 const char* cb_token_type_to_string(CB_NodeType type);
 
+/* Utility to convert an Code string to utf8
+ * It returns a dynamically allocated UTF-8 string. */
+char* line_to_utf8(const CodeBufferLine *line);
 
-/*TODO - This is where I am adding functions i have moved to common */
+/* Utility to convert an utf32 string to utf8 */
+char* utf32_to_utf8(const char32_t*utf32, size_t length);
+
 
 /* Utility to convert transaction code to text */
 const char* transaction_type_to_string(TransactionType type);
@@ -578,6 +593,9 @@ const char* transaction_type_to_string(TransactionType type);
  */
 void base_load_initial_content(CodeBuffer *cb, InitialLoad *initial_load);
 
+/* Utility to free an InitialLoad structure and its contents */
+void free_initial_load(InitialLoad *load);
+
 /*
  * Base functionality to parse the buffer and create the parse tree.
  */
@@ -585,5 +603,12 @@ void base_parse_buffer(CodeBuffer *cb);
 
 /* Function to apply a single transaction - this is the internal base functionality for applying and re-applying transactions*/
 void base_apply_transaction(CodeBuffer *cb, Transaction transaction);
+
+/* 
+ * Emergency Parsing: 
+ * Heuristically update the parse tree after a transaction to maintain basic highlighting
+ * before the full parser response arrives.
+ */
+void cb_emergency_parse_transaction(CodeBuffer *cb, Transaction transaction);
 
 #endif /* TOKEN_BUFFER_H */

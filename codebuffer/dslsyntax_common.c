@@ -2,14 +2,28 @@
 
 #include <ctype.h>
 #include "dslsyntax_common.h"
+#include "dslsyntax_log.h"
 
 /* Initialization & Cleanup */
+
+/* Function to clear node pointers in the code buffer */
+void cb_clear_node_pointers(CodeBuffer *cb) {
+    if (!cb || !cb->lines) return;
+    LOG("cb_clear_node_pointers: clearing %zu lines", cb->line_count);
+    for (size_t i = 0; i < cb->line_count; i++) {
+        for (size_t j = 0; j < cb->lines[i].length; j++) {
+            cb->lines[i].characters[j].node = NULL;
+        }
+        /* Also clear the virtual newline character */
+        cb->lines[i].characters[cb->lines[i].length].node = NULL;
+    }
+}
 
 /* Create a new CB_ParseTree */
 CB_ParseTree* cb_create_token_buffer() {
     CB_ParseTree *tb = (CB_ParseTree *)malloc(sizeof(CB_ParseTree));
     if (tb == NULL) {
-        fprintf(stderr, "Failed to allocate memory for CB_ParseTree\n");
+        LOG("Failed to allocate memory for CB_ParseTree");
         return NULL;
     }
     tb->root = NULL;
@@ -108,8 +122,8 @@ void cb_set_current_parent_to_last_child(CB_ParseTree *tb) {
 static CB_Node* cb_copy_node(const CB_Node *node) {
     CB_Node *new_node = (CB_Node *)malloc(sizeof(CB_Node));
     if (new_node == NULL) {
-        fprintf(stderr, "PANIC: Failed to allocate memory for CB_Node\n");
-        exit(1);
+        LOG("PANIC: Failed to allocate memory for CB_Node");
+        return NULL;
     }
 
     /* Copy simple data types */
@@ -123,7 +137,7 @@ static CB_Node* cb_copy_node(const CB_Node *node) {
     if (node->message_code != NULL) {
         new_node->message_code = strdup(node->message_code);
         if (new_node->message_code == NULL) {
-            fprintf(stderr, "Failed to allocate memory for message_code\n");
+            LOG("Failed to allocate memory for message_code");
             free(new_node);
             return NULL;
         }
@@ -134,7 +148,7 @@ static CB_Node* cb_copy_node(const CB_Node *node) {
     if (node->message != NULL) {
         new_node->message = strdup(node->message);
         if (new_node->message == NULL) {
-            fprintf(stderr, "Failed to allocate memory for message\n");
+            LOG("Failed to allocate memory for message");
             if (new_node->message_code != NULL)
                 free(new_node->message_code);
             free(new_node);
@@ -245,8 +259,8 @@ void cb_add_sibling_node(CB_ParseTree *tb, CB_Node node) {
 
     /* Can't add a sibling to root if it has no parent */
     if (tb->current_parent->parent == NULL) {
-        fprintf(stderr, "Cannot add sibling to root node\n");
-        exit(1);
+        LOG("cb_add_sibling_node: Cannot add sibling to root node");
+        return;
     }
 
     /* Create a copy of the node */
@@ -376,12 +390,12 @@ void cb_order_tree(CB_ParseTree *tb) {
 /* For a better implementation, users should provide their own callback function                       */
 CB_Node cb_default_get_token_callback(__attribute__((unused))void *user_data, size_t pos, size_t length, CodeBufferCharacter * token_chars) {
     if (token_chars == NULL) {
-        fprintf(stderr, "PANIC: Invalid token_chars in cb_default_get_token_callback\n");
-        exit(1);
+        LOG("PANIC: Invalid token_chars in cb_default_get_token_callback");
+        return cb_create_node(LEXER_UNKNOWN, pos, 0);
     }
     if (length == 0) {
-        fprintf(stderr, "PANIC: Invalid length in cb_default_get_token_callback\n");
-        exit(1);
+        LOG("PANIC: Invalid length in cb_default_get_token_callback");
+        return cb_create_node(LEXER_UNKNOWN, pos, 0);
     }
     if (token_chars->codepoints == 0) {
         // EOL
@@ -461,8 +475,8 @@ typedef struct {
 static void cb_add_missing_tokens_node(CB_Node *node, __attribute__((unused)) size_t depth, void *user_data) {
     CB_AddMissingTokensData *data = (CB_AddMissingTokensData *)user_data;
     if (data == NULL || node == NULL) {
-        fprintf(stderr, "PANIC: Invalid data for cb_add_missing_tokens_node\n");
-        exit(1);
+        LOG("PANIC: Invalid data for cb_add_missing_tokens_node");
+        return;
     }
 
     /*
@@ -726,8 +740,8 @@ static void demote_rhs_nodes(CB_Node *subtree, CB_Node *target) {
 
     if (child == NULL) {
         // PANIC - we should never reach here
-        fprintf(stderr, "PANIC: Failed to find target node in demote_rhs_nodes\n");
-        exit(1);
+        LOG("PANIC: Failed to find target node in demote_rhs_nodes");
+        return;
     }
 }
 
@@ -776,8 +790,8 @@ static void demote_lhs_nodes(CB_Node *subtree, CB_Node *target) {
 
     if (child == NULL) {
         // PANIC - we should never reach here
-        fprintf(stderr, "PANIC: Failed to find target node in demote_rhs_nodes\n");
-        exit(1);
+        LOG("PANIC: Failed to find target node in demote_lhs_nodes");
+        return;
     }
 }
 
@@ -926,8 +940,8 @@ static char* escape_string(const char *str) {
     size_t len = strlen(str);
     char *escaped = (char *)malloc(len * 2 + 1);
     if (escaped == NULL) {
-        fprintf(stderr, "PANIC: Failed to allocate memory for escaped string\n");
-        exit(1);
+        LOG("PANIC: Failed to allocate memory for escaped string");
+        return NULL;
     }
 
     size_t j = 0;
@@ -1003,48 +1017,48 @@ static void validate_node(CB_Node *node, size_t depth, void *user_data) {
     CB_Node *last = (CB_Node *)user_data;
 
     if (last == NULL) {
-        fprintf(stderr, "PANIC: NULL last node handle in validate_node\n");
-        exit(1);
+        LOG("PANIC: NULL last node handle in validate_node");
+        return;
     }
 
     if (node == NULL) {
-        fprintf(stderr, "PANIC: NULL node in validate_node\n");
-        exit(1);
+        LOG("PANIC: NULL node in validate_node");
+        return;
     }
 
     /* Check the parent pointer */
     if (node->parent == NULL && depth != 0) {
-        fprintf(stderr, "PANIC: NULL parent pointer in validate_node\n");
-        exit(1);
+        LOG("PANIC: NULL parent pointer in validate_node");
+        return;
     }
 
     /* Check the sibling pointers */
     if (node->sibling != NULL) {
         if (node->sibling->parent != node->parent) {
-            fprintf(stderr, "PANIC: Incorrect parent pointer in validate_node\n");
-            exit(1);
+            LOG("PANIC: Incorrect parent pointer in validate_node");
+            return;
         }
     }
 
     /* Check the child pointers */
     if (node->child != NULL) {
         if (node->child->parent != node) {
-            fprintf(stderr, "PANIC: Incorrect parent pointer in validate_node\n");
-            exit(1);
+            LOG("PANIC: Incorrect parent pointer in validate_node");
+            return;
         }
     }
 
     /* Check the position and length */
     if (node->pos < 0 || node->length < 0) {
-        fprintf(stderr, "PANIC: Invalid position or length in validate_node\n");
-        exit(1);
+        LOG("PANIC: Invalid position or length in validate_node");
+        return;
     }
 
     /* For nodes with children, the pos should be the same as the first child, and length should be the sum of the children */
     if (node->child != NULL) {
         if (node->pos != node->child->pos) {
-            fprintf(stderr, "PANIC: Incorrect position in validate_node\n");
-            exit(1);
+            LOG("PANIC: Incorrect position in validate_node");
+            return;
         }
 
         CB_Node *last_child = node->child;
@@ -1053,24 +1067,24 @@ static void validate_node(CB_Node *node, size_t depth, void *user_data) {
         }
 
         if (node->length != last_child->pos + last_child->length - node->pos) {
-            fprintf(stderr, "PANIC: Incorrect length in validate_node\n");
-            exit(1);
+            LOG("PANIC: Incorrect length in validate_node");
+            return;
         }
     }
 
     /* There should be no gap with the sibling */
     if (node->sibling != NULL) {
         if (node->pos + node->length != node->sibling->pos) {
-            fprintf(stderr, "PANIC: Incorrect gap in validate_node\n");
-            exit(1);
+            LOG("PANIC: Incorrect gap in validate_node");
+            return;
         }
     }
 
     /* Check the order of the nodes */
     if (last != NULL) {
         if (last->pos + last->length != node->pos) {
-            fprintf(stderr, "PANIC: Incorrect order in validate_node\n");
-            exit(1);
+            LOG("PANIC: Incorrect order in validate_node");
+            return;
         }
     }
 
@@ -1092,13 +1106,16 @@ void cb_validate_tree(CB_ParseTree *tb) {
 static void highlight_syntax_node(CB_Node *node, __attribute__((unused)) size_t depth, void *user_data) {
     CodeBuffer *cb = (CodeBuffer *)user_data;
     if (cb == NULL || node == NULL) {
-        fprintf(stderr, "PANIC: Invalid data for highlight_syntax_node\n");
-        exit(1);
+        return;
     }
 
     // Get the line and column position of the token
     size_t line = 0, col = 0;
     get_code_buffer_part(cb, node->pos, node->length, &line, &col, NULL);
+    if (line == 0 || line > cb->line_count) {
+        LOG("highlight_syntax_node: invalid line %zu for pos %zu", line, node->pos);
+        return;
+    }
 
     if (node->child != NULL) {
         // If the node has children, we don't highlight it but rather its children (later), we just have
@@ -1116,8 +1133,8 @@ static void highlight_syntax_node(CB_Node *node, __attribute__((unused)) size_t 
             subtree_lines++;
             l++;
             if (l - 1 >= cb->line_count) {
-                fprintf(stderr, "PANIC: Node spans more lines than the buffer has in highlight_syntax_node (1)\n");
-                exit(1);
+                LOG("highlight_syntax_node: subtree spans beyond buffer");
+                break;
             }
             if (len > cb->lines[l - 1].length) {
                 len -= cb->lines[l - 1].length + 1; // +1 for the line break
@@ -1134,10 +1151,16 @@ static void highlight_syntax_node(CB_Node *node, __attribute__((unused)) size_t 
     char token_type = node->type;
     char severity = node->severity;
 
+    if (node->length > 0) {
+        LOG("highlight_syntax_node: leaf type=%d, pos=%zu, len=%zu", (int)token_type, node->pos, node->length);
+    }
+
     // We need to step through each character in the token and set the attributes and node_lines which might cover multiple lines
     int written = 0;
     // Loop through the lines and set the syntax highlighting and message number
     while (written < node->length) {
+        if (line == 0 || line > cb->line_count) break;
+        
         cb->lines[line - 1].characters[col].token_type = token_type; // Set the token type
         cb->lines[line - 1].characters[col].severity = severity; // Set the severity
         cb->lines[line - 1].characters[col].node = node; // Set the node line to the current node
@@ -1148,10 +1171,6 @@ static void highlight_syntax_node(CB_Node *node, __attribute__((unused)) size_t 
             // Move to the next line
             line++;
             col = 0;
-            if (line - 1 > cb->line_count) {
-                fprintf(stderr, "PANIC: Node spans more lines than the buffer has in highlight_syntax_node (2)\n");
-                exit(1);
-            }
         }
 
         written++; // Increment the written count
@@ -1161,12 +1180,13 @@ static void highlight_syntax_node(CB_Node *node, __attribute__((unused)) size_t 
 // Highlights the buffer using its parse tree
 void highlight_syntax(CodeBuffer *buffer) {
     if (buffer == NULL) {
-        fprintf(stderr, "PANIC: NULL buffer in highlight_syntax\n");
-        exit(1);
+        return;
     }
+    LOG("highlight_syntax: starting, lines=%zu", buffer->line_count);
     if (buffer->parse_tree == NULL) {
-        fprintf(stderr, "PANIC: NULL parse tree in highlight_syntax\n");
-        exit(1);
+        /* No parse tree to highlight with yet */
+        LOG("highlight_syntax: no parse tree");
+        return;
     }
 
     // Clear attributes
@@ -1190,6 +1210,7 @@ void highlight_syntax(CodeBuffer *buffer) {
 
     /* Walk through the token buffer and set the syntax highlighting */
     cb_walk_tree_top_down(buffer->parse_tree, highlight_syntax_node, buffer);
+    LOG("highlight_syntax: finished");
 }
 
 /*
@@ -1199,6 +1220,13 @@ void highlight_syntax(CodeBuffer *buffer) {
  * It frees the initial load after setting the code buffer.
  */
 void base_load_initial_content(CodeBuffer *cb, InitialLoad *initial_load) {
+    if (!cb || !initial_load) {
+        LOG("base_load_initial_content: cb or initial_load is NULL");
+        return;
+    }
+
+    LOG("base_load_initial_content: id=%s, version=%zu, lines=%zu", 
+        initial_load->unique_document_id, initial_load->change_version, initial_load->line_count);
 
     /* Set the CodeBuffer with the initial content */
     /* Set unique_document_id */
@@ -1207,6 +1235,7 @@ void base_load_initial_content(CodeBuffer *cb, InitialLoad *initial_load) {
     /* Set the lines */
     cb->lines = initial_load->lines;
     cb->line_count = initial_load->line_count;
+    cb->change_version = initial_load->change_version;
 
     /* Initialize other fields */
     cb->snapshot_number = 0;
@@ -1222,28 +1251,50 @@ void base_load_initial_content(CodeBuffer *cb, InitialLoad *initial_load) {
     base_parse_buffer(cb);
 }
 
+/* Utility to free an InitialLoad structure and its contents */
+void free_initial_load(InitialLoad *load) {
+    if (!load) return;
+    if (load->unique_document_id) free(load->unique_document_id);
+    if (load->lines) {
+        for (size_t i = 0; i < load->line_count; i++) {
+            if (load->lines[i].characters) {
+                for (size_t j = 0; j <= load->lines[i].length; j++) {
+                    if (load->lines[i].characters[j].heap_character) {
+                        free(load->lines[i].characters[j].heap_character);
+                    }
+                }
+                free(load->lines[i].characters);
+            }
+        }
+        free(load->lines);
+    }
+    free(load);
+}
+
 /*
  * Base functionality to parse the buffer and create the parse tree.
  */
 void base_parse_buffer(CodeBuffer *cb) {
+    if (!cb) return;
+    LOG("base_parse_buffer: starting parse, lines=%zu", cb->line_count);
+
     if (cb->parse_tree) {
         cb_free_token_buffer(cb->parse_tree);
         cb->parse_tree = NULL;
     }
 
     if (cb->parser_function) {
-        /* Call the parser function to create the parse tree
-         * This could be an editor-specific "emergency parser" or
-         * a more complex parser at the parser / server end
-         */
+        LOG("base_parse_buffer: calling parser_function");
         cb->parser_function(cb);
     }
     else {
+        LOG("base_parse_buffer: creating default emergency parse tree");
         /* We need to create the initial emergency parse tree /
          * using the most basic approach */
         cb->parse_tree = cb_create_token_buffer();
         /* Create the root node */
         CB_Node root = cb_create_node(PARSE_TREE_FILE, 0, 0);
+        cb_add_child_node(cb->parse_tree, root);
         cb_set_current_parent_to_root_node(cb->parse_tree);
 
         /* We populate it with a LEXER_TOKEN for each line */
@@ -1255,8 +1306,9 @@ void base_parse_buffer(CodeBuffer *cb) {
             total_length += len + 1; // Include the virtual newline character
             cb_add_child_node(cb->parse_tree, node);
         }
-        root.length = total_length;
+        cb->parse_tree->root->length = total_length;
     }
+    LOG("base_parse_buffer: finished parse");
 }
 
 /* Utility to convert transaction code to text */

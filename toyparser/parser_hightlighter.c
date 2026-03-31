@@ -2,13 +2,33 @@
 // Created by Adrian Sutherland on 13/10/2024.
 //
 #include <string.h>
+#include <unistd.h>
 #include "parser_highlighter.h"
 #include "parser.h"
+#include "dslsyntax_log.h"
+
+int slow_mode = 0;
 
 void ast_to_token_buffer_worker(ASTNode *node, CB_ParseTree *tb);
 
+static size_t count_nodes(CB_Node *node) { // NOLINT(misc-no-recursion)
+    if (node == NULL) return 0;
+    size_t count = 1;
+    CB_Node *child = node->child;
+    while (child) {
+        count += count_nodes(child);
+        child = child->sibling;
+    }
+    return count;
+}
+
 // The actual toy parser function
 void toy_parser(CodeBuffer *codeBuffer) {
+    LOG("toy_parser: starting parse");
+    if (slow_mode) {
+        LOG("toy_parser: slow mode enabled, sleeping 2s");
+        sleep(2);
+    }
     char *source_code = get_code_buffer_source(codeBuffer);
 
     // Initialize lexer
@@ -17,33 +37,31 @@ void toy_parser(CodeBuffer *codeBuffer) {
 
     // Parse the program
     ASTNode *ast = parse_program(&lexer);
-
-    // Print the AST
-    // print_ast(ast, 0);
+    LOG("toy_parser: program parsed into AST");
 
     // Convert AST to CB_NodeBuffer
     CB_ParseTree *tb = cb_create_token_buffer();
     ast_to_token_buffer(ast, tb, codeBuffer);
+    LOG("toy_parser: AST converted to token buffer");
+    if (tb && tb->root) {
+        LOG("toy_parser: number of nodes in token buffer: %zu", count_nodes(tb->root));
+    }
 
     // Free parser resources
     free_ast(ast);
     free_token_list();
     free(source_code);
 
-    // Print the CB_ParseTree
-    // cb_print_token_buffer(codeBuffer, tb);
-
-    // For debugging - sleep to simulate some processing time to simulate a slow parser
-//    usleep(1000000); // Sleep for 1000 milliseconds to simulate processing time
-
     codeBuffer->parse_tree = tb; // Set the parse tree in the editor CodeBuffer
+    LOG("toy_parser: finished");
 }
 
 void highlight_init(char* source_code, CodeBuffer **cb, CB_ParseTree **tb) {
 
     if (*cb == NULL) {
         // Panic
-        fprintf(stderr, "PANIC: CodeBuffer is NULL in highlight_init\n");
+        LOG("highlight_init: CodeBuffer is NULL");
+        return;
     }
 
     // Initialize lexer
@@ -133,6 +151,10 @@ static CB_NodeType map_parser_to_token_type(ParserTokenType type) {
 CB_Node ast_get_token_callback(__attribute__((unused)) void *user_data, size_t pos, size_t length, __attribute__((unused))CodeBufferCharacter* token_chars) {
     /* Get the token at the given position */
     ParserToken* parser_token = get_token_by_pos(pos);
+    if (parser_token == NULL) {
+        LOG("ast_get_token_callback: token not found at pos %zu", pos);
+        return cb_create_node(LEXER_UNKNOWN, pos, 1);
+    }
     if (parser_token->type == PARSER_TOKEN_EOF) {
         return cb_create_node(LEXER_EOF, pos, 1);
     }
@@ -143,13 +165,13 @@ CB_Node ast_get_token_callback(__attribute__((unused)) void *user_data, size_t p
 
     if (token.length == 0) {
         // PANIC
-        fprintf(stderr, "PANIC: Invalid token length in ast_get_token_callback\n");
-        exit(1);
+        LOG("PANIC: Invalid token length in ast_get_token_callback");
+        return cb_create_node(LEXER_UNKNOWN, pos, 1);
     }
     if (token.length > length) {
         // PANIC
-        fprintf(stderr, "PANIC: Invalid token length in ast_get_token_callback\n");
-        exit(1);
+        LOG("PANIC: Invalid token length in ast_get_token_callback");
+        return cb_create_node(LEXER_UNKNOWN, pos, 1);
     }
 
     //CB_Node node = cb_default_get_token_callback(NULL, pos, length, token_chars);
@@ -161,12 +183,17 @@ CB_Node ast_get_token_callback(__attribute__((unused)) void *user_data, size_t p
 void ast_to_token_buffer(ASTNode *node, CB_ParseTree *tb, CodeBuffer *cb) {
     if (node == NULL || tb == NULL) {
         // Panic
-        fprintf(stderr, "PANIC: Invalid node or token buffer in ast_to_token_buffer\n");
-        exit(1);
+        LOG("PANIC: Invalid node or token buffer in ast_to_token_buffer");
+        return;
     }
 
     /* Convert AST to CB_NodeBuffer */
     ast_to_token_buffer_worker(node, tb);
+
+    if (tb->root == NULL) {
+        LOG("ast_to_token_buffer: tb->root is NULL after worker");
+        return;
+    }
 
     /* Sort the tokens */
     cb_order_tree(tb);
