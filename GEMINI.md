@@ -18,22 +18,27 @@ The **DSL Syntax Highlighter (SDSLH)** is a C library providing a platform for s
 ## Common Operations
 ### Build the Project
 ```bash
-mkdir build && cd build && cmake .. && make
+mkdir -p cmake-build-debug && cd cmake-build-debug && cmake .. && cmake --build .
 ```
 
 ### Run Tests
 ```bash
-./build/codebuffer/serialization_test
-./build/codebuffer/socket_test
-./build/codebuffer/diff_test
+ctest
 ```
 
 ### Run Client/Server
 ```bash
+# Default (STDIO mode - Editor launches Parser automatically)
+./toyeditor/te toyeditor/test.toy
+
+# Specify Parser location and args (e.g. slow mode)
+./toyeditor/te --parser ./toyparser/tp --parser-args "-s" toyeditor/test.toy
+
+# Socket mode
 # Terminal 1
-./build/toyparser/tp -d 8080
+./toyparser/tp -d 8080
 # Terminal 2
-./build/toyeditor/te -d toyeditor/test.toy
+./toyeditor/te --socket --port 8080 toyeditor/test.toy
 ```
 
 ## Maintenance Rules

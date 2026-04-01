@@ -3,8 +3,17 @@
 This document defines the communication protocol between a text editor (client) and a language parser (server).
 
 ## 1. Transport Layer
-The current implementation uses **TCP Sockets** (default port `8080`). 
-Messages are prefixed with a 4-byte network-order length header.
+SDSLH supports two primary transport methods for out-of-process communication:
+
+### 1.1 STDIN/STDOUT (Default)
+This is the recommended transport for local language parsers. The editor launches the parser as a child process and communicates via pipes.
+- **Framing**: Every message is prefixed with an **8-character hex string** representing the payload length (e.g., `000000ff` for 255 bytes).
+- **Child Management**: The editor is responsible for spawning and terminating the child process.
+
+### 1.2 TCP Sockets
+Alternative transport for remote parsers or persistent servers.
+- **Framing**: Identical to STDIO (**8-character hex length header**).
+- **Default Port**: `8080`.
 
 ## 2. Message Format
 Messages are text-based, using `|` as a field separator. For robustness, string content (source code, error messages) is **hex-encoded**.

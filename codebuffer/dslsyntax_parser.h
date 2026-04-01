@@ -22,4 +22,10 @@ void parser_load_initial_content(CodeBuffer *cb, InitialLoad *initial_load);
  */
 void cb_start_server(CodeBuffer *parser_cb, const char *address, int port);
 
+/* 
+ * Server Loop for the Parser
+ * This function blocks and handles client connections via STDIN/STDOUT.
+ */
+void cb_start_stdio_server(CodeBuffer *parser_cb);
+
 #endif //DSLSYNTAX_PARSER_H

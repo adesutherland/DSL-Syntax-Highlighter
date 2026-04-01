@@ -294,7 +294,6 @@ void free_buffer(TextBuffer *buffer) {
 }
 
 void editor_refresh(TextBuffer *buffer, int cursor_x, int cursor_y) {
-    int max_x, max_y;
     highlight_log_count = 0;
     //clear();
     getmaxyx(stdscr, max_y, max_x);
@@ -323,7 +322,6 @@ void editor_refresh(TextBuffer *buffer, int cursor_x, int cursor_y) {
 
     // Body
     int i, j;
-    int last_attr = -1; // To track the last attribute used
     attron(COLOR_PAIR(PAIR_BODY));
     for (i = 0; i + scroll_line < buffer->num_rows && i < max_y - 2; i++) {
         // Position cursor at the beginning of the line
@@ -351,18 +349,12 @@ void editor_refresh(TextBuffer *buffer, int cursor_x, int cursor_y) {
             if (bold) attr |= A_BOLD;
             if (italic) attr |= A_ITALIC;
             if (dim) attr |= A_DIM;
-            if (attr != last_attr) {
-                if (last_attr != -1) {
-                    attroff(last_attr); // Turn off the last attribute
-                }
-                attron(attr); // Turn on the new attribute
-                last_attr = attr; // Update the last attribute
-            }
+            
+            wattrset(stdscr, attr);
             addch(ch);
         }
-        // Reset Attrinutes
-        if (last_attr != -1) attroff(last_attr); // Turn off the last attribute
-        attron(COLOR_PAIR(PAIR_BODY));
+        // Reset Attributes
+        wattrset(stdscr, COLOR_PAIR(PAIR_BODY));
 
         // Fill the rest of the line with spaces
         for (; j < max_x; j++) {
@@ -578,24 +570,55 @@ void add_line(TextBuffer *buffer, int y) {
 }
 int main(int argc, char *argv[]) {
     char *filename = NULL;
+    char *parser_path = "../toyparser/tp"; // Default
+    char *parser_args = ""; // Default
     int debug = 0;
+    int use_socket = 0;
+    int port = 8080;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-d") == 0) debug = 1;
+        else if (strcmp(argv[i], "--socket") == 0) use_socket = 1;
+        else if (i + 1 < argc && strcmp(argv[i], "--port") == 0) {
+            port = atoi(argv[++i]);
+            use_socket = 1;
+        }
+        else if (i + 1 < argc && (strcmp(argv[i], "--parser") == 0 || strcmp(argv[i], "-p") == 0)) {
+            parser_path = argv[++i];
+        }
+        else if (i + 1 < argc && (strcmp(argv[i], "--parser-args") == 0 || strcmp(argv[i], "-a") == 0)) {
+            parser_args = argv[++i];
+        }
         else filename = argv[i];
     }
 
     if (!filename) {
-        printf("Usage: %s [-d] filename\n", argv[0]);
+        printf("Usage: %s [-d] [--socket] [--port 8080] [--parser ../toyparser/tp] [--parser-args \"args\"] filename\n", argv[0]);
         exit(EXIT_FAILURE);
     }
 
     if (debug) cb_log_init("editor.log");
     LOG("Toy Editor starting for file: %s", filename);
 
-    // Set up the SDL highlighter - socket to the toy parser server
+    // Set up the SDL highlighter
     editor_init(); // Initialize the editor side of the library
-    sdlhighlighter = create_socket_communication_functions("127.0.0.1", 8080); // Connect to server
+    
+    if (use_socket) {
+        LOG("Connecting to parser via socket on port %d", port);
+        sdlhighlighter = create_socket_communication_functions("127.0.0.1", port);
+    } else {
+        LOG("Launching parser via stdio: %s %s", parser_path, parser_args);
+        char cmd[2048];
+        /* Pass debug flag to parser if editor is in debug mode */
+        if (debug) sprintf(cmd, "%s -d %s", parser_path, parser_args);
+        else sprintf(cmd, "%s %s", parser_path, parser_args);
+        sdlhighlighter = create_stdio_communication_functions(cmd);
+    }
+
+    if (!sdlhighlighter) {
+        fprintf(stderr, "Failed to initialize highlighter communication\n");
+        exit(EXIT_FAILURE);
+    }
 
     // This takes control for this editor main thread
     if (enter_codeblock_critical_section() != 0) {
@@ -665,8 +688,10 @@ int main(int argc, char *argv[]) {
         // Page Up
         if (c == KEY_PPAGE) {
             if (cursor_y > 0) {
-                cursor_y -= (max_y - 3); // Scroll up by the height of the window minus header/footer
-                if (cursor_y < 0) cursor_y = 0; // Ensure we don't
+                int page_size = max_y - 3;
+                if (page_size < 1) page_size = 1;
+                cursor_y -= page_size;
+                if (cursor_y < 0) cursor_y = 0;
                 if (cursor_x > strlen(buffer.rows[cursor_y])) {
                     cursor_x = (int)strlen(buffer.rows[cursor_y]);
                 }
@@ -685,8 +710,11 @@ int main(int argc, char *argv[]) {
         // Page Down
         if (c == KEY_NPAGE) {
             if (cursor_y < buffer.num_rows - 1) {
-                cursor_y += (max_y - 3); // Scroll down by the height of the window minus header/footer
-                if (cursor_y >= buffer.num_rows) cursor_y = buffer.num_rows - 1; // Ensure we don't go out of bounds
+                int page_size = max_y - 3;
+                if (page_size < 1) page_size = 1;
+                cursor_y += page_size;
+                if (cursor_y >= buffer.num_rows) cursor_y = buffer.num_rows - 1;
+                if (cursor_y < 0) cursor_y = 0;
                 if (cursor_x > strlen(buffer.rows[cursor_y])) {
                     cursor_x = (int)strlen(buffer.rows[cursor_y]);
                 }
@@ -775,8 +803,12 @@ int main(int argc, char *argv[]) {
 
     /* Free the communication functions */
     if (sdlhighlighter) {
-        if (sdlhighlighter->comms_data) free(sdlhighlighter->comms_data);
-        free(sdlhighlighter);
+        if (use_socket) {
+            if (sdlhighlighter->comms_data) free(sdlhighlighter->comms_data);
+            free(sdlhighlighter);
+        } else {
+            free_stdio_communication_functions(sdlhighlighter);
+        }
     }
 
     // Clean up ncurses

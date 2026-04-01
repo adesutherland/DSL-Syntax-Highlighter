@@ -29,9 +29,9 @@ SDSLH is a high-performance C-based platform that decouples language intelligenc
 
 ### 1. Build the Project
 ```bash
-mkdir build && cd build
+mkdir -p cmake-build-debug && cd cmake-build-debug
 cmake ..
-make
+cmake --build .
 ```
 
 ### 2. Run Automated Tests
@@ -40,17 +40,17 @@ ctest
 ```
 
 ### 3. Launch the Demo
-Open two terminals from the root directory:
+The editor defaults to **STDIO mode**, automatically launching the parser child process.
 
-**Terminal 1 (Parser Server):**
 ```bash
-./build/toyparser/tp -d -s 8080
-```
-*(The `-s` flag introduces a artificial 2s delay so you can see Emergency Parsing in action!)*
+# Basic launch (using default parser path)
+./toyeditor/te toyeditor/test.toy
 
-**Terminal 2 (Editor Client):**
-```bash
-./build/toyeditor/te -d toyeditor/test.toy
+# Specify a custom parser location and pass arguments (like slow mode)
+./toyeditor/te --parser ./toyparser/tp --parser-args "-s" toyeditor/test.toy
+
+# Enable debug logging (writes to editor.log and parser.log)
+./toyeditor/te -d toyeditor/test.toy
 ```
 
 ## ⚖️ License

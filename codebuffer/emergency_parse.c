@@ -53,27 +53,34 @@ static void cb_emergency_scan_line(CodeBuffer *cb, int line_idx) {
                 in_string = 1;
                 string_char = (char)cp;
                 c->token_type = LEXER_STRING_LITERAL;
+                c->node = NULL; /* Heuristic match has no node */
+                c->severity = CB_NONE;
                 continue;
             } else if (in_string && cp == (char32_t)string_char) {
                 in_string = 0;
                 c->token_type = LEXER_STRING_LITERAL;
+                c->node = NULL;
+                c->severity = CB_NONE;
                 continue;
             }
             if (in_string) {
                 c->token_type = LEXER_STRING_LITERAL;
+                c->node = NULL;
+                c->severity = CB_NONE;
                 continue;
             }
         }
 
-        /* 2. Handle Comments (// and slash-star) */
-        if (!in_string && !in_comment && i + 1 < line->length) {
-            char32_t next_cp = line->characters[i+1].character[0];
-            if (cp == '/' && (next_cp == '/' || next_cp == '*')) {
+        /* 2. Handle Comments (//, slash-star and #) */
+        if (!in_string && !in_comment) {
+            if (cp == '#' || (i + 1 < line->length && cp == '/' && (line->characters[i+1].character[0] == '/' || line->characters[i+1].character[0] == '*'))) {
                 in_comment = 1;
             }
         }
         if (in_comment) {
             c->token_type = LEXER_COMMENT;
+            c->node = NULL;
+            c->severity = CB_NONE;
             continue;
         }
 
@@ -81,6 +88,8 @@ static void cb_emergency_scan_line(CodeBuffer *cb, int line_idx) {
         if (!in_string && !in_comment) {
             if (cp >= '0' && cp <= '9') {
                 c->token_type = LEXER_NUMBER_LITERAL;
+                c->node = NULL;
+                c->severity = CB_NONE;
                 continue;
             }
         }

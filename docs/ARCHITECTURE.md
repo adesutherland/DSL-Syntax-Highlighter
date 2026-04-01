@@ -32,7 +32,9 @@ For bulk updates like copy-paste or external file modifications, the library inc
 The core engine, containing:
 - **Data Structures**: `CodeBuffer`, `CB_ParseTree`, `CB_Node`.
 - **Marshalling**: Hex-encoded text protocol for robust transmission.
-- **Transport**: Socket-based communication and server loops in `comms.c`.
+- **Transport**: 
+    - **STDIO (Default)**: Process-based communication using pipes. Handles child lifecycle and framing.
+    - **Sockets**: Network-based communication for persistent or remote servers.
 - **Threading**: Background synchronization threads and event signaling in `thread_utils.c`.
 - **Logging**: A diagnostic logging system (`-d` flag) for tracing synchronization events.
 

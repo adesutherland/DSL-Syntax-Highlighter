@@ -70,5 +70,6 @@ CommunicationFunctions* create_socket_communication_functions(const char *addres
  * It calls the parser's logic for each request.
  */
 void cb_start_server(CodeBuffer *parser_cb, const char *address, int port);
+void cb_start_stdio_server(CodeBuffer *parser_cb);
 
 #endif /* DSLSYNTAX_SERIALIZATION_H */

@@ -154,12 +154,13 @@ ParserToken *lexer_string(Lexer *lexer) {
     int start_line = lexer->line;
     int start_column = lexer->column;
     size_t start_pos = lexer->pos;
+    char quote = lexer->current_char;
     lexer_advance(lexer); // Skip the opening quote
 
-    while (lexer->current_char != '\0' && lexer->current_char != '\n' && lexer->current_char != '"') {
+    while (lexer->current_char != '\0' && lexer->current_char != '\n' && lexer->current_char != quote) {
         lexer_advance(lexer);
     }
-    if (lexer->current_char == '"') {
+    if (lexer->current_char == quote) {
         size_t length = lexer->pos - start_pos + 1;
         char *string_str = strndup(lexer->text + start_pos, length);
         lexer_advance(lexer); // Skip the closing quote
@@ -188,6 +189,29 @@ ParserToken* lexer_get_next_token(Lexer *lexer) {
             continue;
         }
 
+        if (lexer->current_char == '/') {
+            if (lexer->text[lexer->pos + 1] == '/') {
+                lexer_skip_comment(lexer);
+                continue;
+            } else if (lexer->text[lexer->pos + 1] == '*') {
+                /* Block comment */
+                size_t start_pos = lexer->pos;
+                int start_line = lexer->line;
+                int start_col = lexer->column;
+                lexer_advance(lexer); // /
+                lexer_advance(lexer); // *
+                while (lexer->current_char != '\0' && !(lexer->current_char == '*' && lexer->text[lexer->pos + 1] == '/')) {
+                    lexer_advance(lexer);
+                }
+                if (lexer->current_char == '*') {
+                    lexer_advance(lexer); // *
+                    lexer_advance(lexer); // /
+                }
+                add_token(PARSER_TOKEN_COMMENT, 0, 0, start_pos, lexer->pos - start_pos, start_line, start_col, lexer->line, lexer->column);
+                continue;
+            }
+        }
+
         if (isdigit(lexer->current_char)) {
             return lexer_number(lexer);
         }
@@ -196,7 +220,7 @@ ParserToken* lexer_get_next_token(Lexer *lexer) {
             return lexer_identifier(lexer);
         }
 
-        if (lexer->current_char == '"') {
+        if (lexer->current_char == '"' || lexer->current_char == '\'') {
             return lexer_string(lexer);
         }
 

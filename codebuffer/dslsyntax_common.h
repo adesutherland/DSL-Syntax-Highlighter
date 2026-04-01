@@ -367,8 +367,17 @@ Delta* get_delta(CodeBuffer *cb);
 /* Inproc communications functions factory */
 CommunicationFunctions* create_inproc_communication_functions(CodeBuffer *parser_cb);
 
+/* Socket communications functions factory */
+CommunicationFunctions* create_socket_communication_functions(const char *address, int port);
+
+/* STDIN/STDOUT communications functions factory */
+CommunicationFunctions* create_stdio_communication_functions(const char *command);
+
 // Free the inproc communication functions
 void free_inproc_communication_functions(CommunicationFunctions *comm);
+
+// Free the stdio communication functions
+void free_stdio_communication_functions(CommunicationFunctions *comm);
 
 /* Function Prototypes - Utility / Common Functions */
 
