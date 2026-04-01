@@ -106,9 +106,10 @@ static EP_Rules* copy_ep_rules(EP_Rules *src) {
     for (size_t i = 0; i < src->operator_count; i++) add_unique_string(&dst->operators, &dst->operator_count, src->operators[i]);
     for (size_t i = 0; i < src->line_comment_count; i++) add_unique_string(&dst->line_comment_starts, &dst->line_comment_count, src->line_comment_starts[i]);
     for (size_t i = 0; i < src->block_comment_count; i++) {
-        add_unique_string(&dst->block_comment_starts, &dst->block_comment_count, src->block_comment_starts[i]);
-        dst->block_comment_ends = realloc(dst->block_comment_ends, sizeof(char*) * dst->block_comment_count);
-        dst->block_comment_ends[dst->block_comment_count - 1] = src->block_comment_ends[i] ? strdup(src->block_comment_ends[i]) : NULL;
+        if (add_unique_string(&dst->block_comment_starts, &dst->block_comment_count, src->block_comment_starts[i])) {
+            dst->block_comment_ends = realloc(dst->block_comment_ends, sizeof(char*) * dst->block_comment_count);
+            dst->block_comment_ends[dst->block_comment_count - 1] = src->block_comment_ends[i] ? strdup(src->block_comment_ends[i]) : NULL;
+        }
     }
     for (size_t i = 0; i < src->string_quote_count; i++) add_unique_char(&dst->string_quotes, &dst->string_quote_count, src->string_quotes[i]);
     dst->is_positional = src->is_positional;
@@ -157,9 +158,10 @@ void cb_load_ep_config(const char *path) {
                 } else if (strcmp(l, "line_comment") == 0) {
                     add_unique_string(&current->line_comment_starts, &current->line_comment_count, val);
                 } else if (strcmp(l, "block_start") == 0) {
-                    add_unique_string(&current->block_comment_starts, &current->block_comment_count, val);
-                    current->block_comment_ends = realloc(current->block_comment_ends, sizeof(char*) * current->block_comment_count);
-                    current->block_comment_ends[current->block_comment_count - 1] = NULL;
+                    if (add_unique_string(&current->block_comment_starts, &current->block_comment_count, val)) {
+                        current->block_comment_ends = realloc(current->block_comment_ends, sizeof(char*) * current->block_comment_count);
+                        current->block_comment_ends[current->block_comment_count - 1] = NULL;
+                    }
                 } else if (strcmp(l, "block_end") == 0) {
                     if (current->block_comment_count > 0) {
                         current->block_comment_ends[current->block_comment_count - 1] = strdup(val);
