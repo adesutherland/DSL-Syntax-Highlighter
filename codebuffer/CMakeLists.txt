@@ -51,6 +51,9 @@ target_link_libraries(socket_test dslsyntax_parser pthread)
 add_executable(diff_test diff_test.c)
 target_link_libraries(diff_test dslsyntax_editor)
 
+add_executable(ep_test ep_test.c)
+target_link_libraries(ep_test dslsyntax_editor)
+
 add_executable(fake_editor fake_editor.c)
 target_link_libraries(fake_editor dslsyntax_editor)
 
@@ -63,3 +66,4 @@ enable_testing()
 add_test(NAME serialization_test COMMAND serialization_test)
 add_test(NAME socket_test COMMAND socket_test)
 add_test(NAME diff_test COMMAND diff_test)
+add_test(NAME ep_test COMMAND ep_test)

@@ -602,6 +602,7 @@ int main(int argc, char *argv[]) {
 
     // Set up the SDL highlighter
     editor_init(); // Initialize the editor side of the library
+    cb_load_ep_config("ep_rules.conf");
     
     if (use_socket) {
         LOG("Connecting to parser via socket on port %d", port);

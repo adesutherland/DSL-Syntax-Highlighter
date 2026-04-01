@@ -1,6 +1,7 @@
 /* code_buffer.c */
 
 #include <unistd.h>
+#include <ctype.h>
 
 #include "dslsyntax_common.h"
 #include "dslsyntax_log.h"
@@ -381,6 +382,7 @@ CodeBuffer* create_code_buffer(CommunicationFunctions *comm, ParserFunction pars
     cb->line_count = 0;
     cb->parse_tree = NULL;
     cb->highest_severity = CB_NONE;
+    cb->ep_rules = NULL;
     cb->transactions = NULL;
     cb->transaction_count = 0;
     cb->change_version = 0;
@@ -494,18 +496,40 @@ void base_apply_transaction(CodeBuffer *cb, Transaction transaction) {
                     cb_char->character[1] = 0; // Null-terminate the character
                     cb_char->codepoints = 1; // Set codepoints to 1 for each character
                     
-                    /* Heuristic: Force whitespace type if character is a space */
+                    /* Determine if we are extending the previous token */
+                    int extend = 0;
+                    if (!utf32_isspace(cp) && attr_char.token_type != LEXER_WHITESPACE && attr_char.token_type != LEXER_TOKEN) {
+                        if (attr_char.token_type == LEXER_STRING_LITERAL || attr_char.token_type == LEXER_COMMENT) {
+                            extend = 1; /* Always extend strings/comments */
+                        } else if (isalnum(cp) || cp == '_') {
+                            /* Extend if it's alphanumeric/underscore AND the previous character is part of a word-like token */
+                            if (attr_char.token_type == LEXER_IDENTIFIER || attr_char.token_type == LEXER_KEYWORD || attr_char.token_type == LEXER_NUMBER_LITERAL) {
+                                extend = 1;
+                            }
+                        } else if (ispunct(cp) && cp != '"' && cp != '\'' && cp != '#' && cp != '/') {
+                             if (attr_char.token_type == LEXER_OPERATOR || attr_char.token_type == LEXER_OPERATOR_ASSIGN || attr_char.token_type == LEXER_OPERATOR_ARITHMETIC || attr_char.token_type == LEXER_OPERATOR_LOGICAL) {
+                                 extend = 1;
+                             }
+                        }
+                    }
+
                     if (utf32_isspace(cp)) {
                         cb_char->token_type = LEXER_WHITESPACE;
-                    } else {
+                        cb_char->severity = CB_NONE;
+                        cb_char->node = NULL;
+                    } else if (extend) {
                         cb_char->token_type = attr_char.token_type;
+                        cb_char->severity = attr_char.severity;
+                        cb_char->node = attr_char.node;
+                    } else {
+                        cb_char->token_type = LEXER_TOKEN;
+                        cb_char->severity = CB_NONE;
+                        cb_char->node = NULL;
                     }
                     
                     cb_char->heap_character = NULL; // New character doesn't have heap allocation
-                    cb_char->severity = attr_char.severity;
-                    cb_char->subtree_type = attr_char.subtree_type;
-                    cb_char->subtree_lines = attr_char.subtree_lines;
-                    cb_char->node = attr_char.node;
+                    cb_char->subtree_type = 0;
+                    cb_char->subtree_lines = 0;
                 }
                 // Free the utf32_content
                 free(utf32_content);

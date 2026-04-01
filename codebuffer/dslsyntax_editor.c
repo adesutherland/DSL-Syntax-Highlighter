@@ -185,6 +185,8 @@ static void* load_initial_content_thread(void *arg) {
         copy_snapshot_to_codebuffer(data->code_buffer);
     }
 
+    cb_learn_ep_rules(data->code_buffer);
+
     LOG("load_initial_content_thread: highlighting syntax");
     highlight_syntax(data->code_buffer);
 
@@ -318,6 +320,9 @@ void load_initial_content(CodeBuffer *cb, InitialLoad *initial_load) {
         exit(EXIT_FAILURE);
     }
 
+    /* Seed EP rules based on filename/id */
+    cb_seed_ep_rules(cb, initial_load->unique_document_id);
+
     /* Call Base functionality to Load the Initial Content
      * This sets the local CodeBuffer object, after which the codeblock
      * can be used. It frees the initial load after setting the code buffer.
@@ -378,6 +383,8 @@ static void* process_delta_thread(void *arg) {
     if (data->code_buffer->transaction_count > 0) {
         copy_snapshot_to_codebuffer(data->code_buffer);
     }
+
+    cb_learn_ep_rules(data->code_buffer);
 
     LOG("process_delta_thread: highlighting syntax");
     highlight_syntax(data->code_buffer);

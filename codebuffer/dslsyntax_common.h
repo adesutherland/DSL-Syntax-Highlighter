@@ -275,6 +275,24 @@ typedef struct CodeBufferLine {
     size_t length;                   // Length of the line (excluding the null terminator)
 } CodeBufferLine;
 
+/* Emergency Parsing (EP) Rules - Learned from the authoritative parser */
+typedef struct EP_Rules {
+    char *extension;
+    char *shebang_pattern;
+    char **keywords;
+    size_t keyword_count;
+    char **operators;
+    size_t operator_count;
+    char **line_comment_starts;
+    size_t line_comment_count;
+    char **block_comment_starts;
+    size_t block_comment_count;
+    char **block_comment_ends;
+    char *string_quotes;
+    size_t string_quote_count;
+    int is_positional; // e.g., Python-style indentation
+} EP_Rules;
+
 /* Structure of the main shared code buffer, synced between editor and parser */
 typedef struct CodeBuffer {
     // Header
@@ -288,6 +306,9 @@ typedef struct CodeBuffer {
     // Parse Result - most recent version
     CB_ParseTree *parse_tree;        // Pointer to the parse tree
     CB_Severity highest_severity;
+
+    // Emergency Parsing Rules
+    EP_Rules *ep_rules;
 
     // Snapshot information
     int snapshot_number;             // The change version of the snapshot
@@ -378,6 +399,13 @@ void free_inproc_communication_functions(CommunicationFunctions *comm);
 
 // Free the stdio communication functions
 void free_stdio_communication_functions(CommunicationFunctions *comm);
+
+// Emergency Parsing Functions
+void cb_emergency_parse_transaction(CodeBuffer *cb, Transaction transaction);
+void cb_learn_ep_rules(CodeBuffer *cb);
+void cb_seed_ep_rules(CodeBuffer *cb, const char *filename);
+void cb_load_ep_config(const char *path);
+void cb_free_ep_rules(EP_Rules *rules);
 
 /* Function Prototypes - Utility / Common Functions */
 
