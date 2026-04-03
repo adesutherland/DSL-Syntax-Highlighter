@@ -117,19 +117,32 @@ static EP_Rules* copy_ep_rules(EP_Rules *src) {
     return dst;
 }
 
-void cb_load_ep_config(const char *path) {
-    FILE *f = fopen(path, "r");
-    if (!f) {
-        LOG("cb_load_ep_config: could not open %s", path);
-        return;
-    }
+static char *global_ep_config_string = NULL;
 
-    char line[1024];
+void cb_set_ep_config_string(const char *str) {
+    if (global_ep_config_string) free(global_ep_config_string);
+    global_ep_config_string = str ? strdup(str) : NULL;
+}
+
+const char *cb_get_ep_config_string(void) {
+    return global_ep_config_string;
+}
+
+void cb_load_ep_config_from_string(const char *config_str) {
+    if (!config_str) return;
+
+    char *copy = strdup(config_str);
+    char *saveptr;
+    char *line = strtok_r(copy, "\n", &saveptr);
     EP_Rules *current = NULL;
-    while (fgets(line, sizeof(line), f)) {
+    
+    while (line) {
         char *l = line;
         while (isspace(*l)) l++;
-        if (*l == '#' || *l == '\0') continue;
+        if (*l == '#' || *l == '\0') {
+            line = strtok_r(NULL, "\n", &saveptr);
+            continue;
+        }
 
         if (*l == '[') {
             char *end = strchr(l, ']');
@@ -149,11 +162,11 @@ void cb_load_ep_config(const char *path) {
                 while (vend > val && isspace(*vend)) { *vend = '\0'; vend--; }
 
                 if (strcmp(l, "keywords") == 0) {
-                    char *tok = strtok(val, ",");
-                    while (tok) { add_unique_string(&current->keywords, &current->keyword_count, tok); tok = strtok(NULL, ","); }
+                    char *tok = strtok_r(val, ",", &val);
+                    while (tok) { add_unique_string(&current->keywords, &current->keyword_count, tok); tok = strtok_r(NULL, ",", &val); }
                 } else if (strcmp(l, "operators") == 0) {
-                    char *tok = strtok(val, ",");
-                    while (tok) { add_unique_string(&current->operators, &current->operator_count, tok); tok = strtok(NULL, ","); }
+                    char *tok = strtok_r(val, ",", &val);
+                    while (tok) { add_unique_string(&current->operators, &current->operator_count, tok); tok = strtok_r(NULL, ",", &val); }
                     sort_operators(current);
                 } else if (strcmp(l, "line_comment") == 0) {
                     add_unique_string(&current->line_comment_starts, &current->line_comment_count, val);
@@ -175,9 +188,31 @@ void cb_load_ep_config(const char *path) {
                 }
             }
         }
+        line = strtok_r(NULL, "\n", &saveptr);
     }
+    free(copy);
+    LOG("cb_load_ep_config_from_string: loaded %zu languages", global_config.count);
+}
+
+void cb_load_ep_config(const char *path) {
+    FILE *f = fopen(path, "r");
+    if (!f) {
+        LOG("cb_load_ep_config: could not open %s", path);
+        return;
+    }
+
+    fseek(f, 0, SEEK_END);
+    long fsize = ftell(f);
+    fseek(f, 0, SEEK_SET);
+
+    char *string = malloc(fsize + 1);
+    size_t read_bytes = fread(string, 1, fsize, f);
     fclose(f);
-    LOG("cb_load_ep_config: loaded %zu languages from %s", global_config.count, path);
+    string[read_bytes] = '\0';
+
+    cb_load_ep_config_from_string(string);
+    cb_set_ep_config_string(string);
+    free(string);
 }
 
 /* 

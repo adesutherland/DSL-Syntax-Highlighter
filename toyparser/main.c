@@ -29,6 +29,16 @@ int main(int argc, char *argv[]) {
         LOG("Toy Parser Server starting on port %d... (slow_mode=%d)", port, slow_mode);
     }
 
+    const char *toy_config = 
+        "[.toy]\n"
+        "keywords=say,int,function,void,call,namespace\n"
+        "operators=+, -, *, /, =\n"
+        "line_comment=//\n"
+        "block_start=/*\n"
+        "block_end=*/\n"
+        "quotes=\"\n";
+    cb_set_ep_config_string(toy_config);
+
     /* Create the CodeBuffer with the toy_parser function */
     CodeBuffer *cb = create_code_buffer(NULL, toy_parser);
     

@@ -362,10 +362,14 @@ typedef CB_ParseTree* (*SendInitialLoad)(CommunicationFunctions *comm_block, Ini
 /* Function to send a delta to the parser */
 typedef CB_ParseTree* (*SendDelta)(CommunicationFunctions *comm_block, Delta *delta);
 
+/* Function to request EP config from the parser */
+typedef void (*RequestEPConfig)(CommunicationFunctions *comm_block);
+
 /* Communication Function Pointer Structure */
 struct CommunicationFunctions {
     SendInitialLoad send_initial_load;
     SendDelta send_delta;
+    RequestEPConfig request_ep_config;
     void* comms_data; // Pointer to data for the communication functions
 };
 
@@ -405,6 +409,9 @@ void cb_emergency_parse_transaction(CodeBuffer *cb, Transaction transaction);
 void cb_learn_ep_rules(CodeBuffer *cb);
 void cb_seed_ep_rules(CodeBuffer *cb, const char *filename);
 void cb_load_ep_config(const char *path);
+void cb_load_ep_config_from_string(const char *config_str);
+void cb_set_ep_config_string(const char *str);
+const char *cb_get_ep_config_string(void);
 void cb_free_ep_rules(EP_Rules *rules);
 
 /* Function Prototypes - Utility / Common Functions */

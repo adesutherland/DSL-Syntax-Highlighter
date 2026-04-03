@@ -169,14 +169,47 @@ static CB_ParseTree* socket_send_delta(CommunicationFunctions *comm_block, Delta
     return tb;
 }
 
+static void socket_request_ep_config(CommunicationFunctions *comm_block) {
+    SocketCommsData *sd = (SocketCommsData*)comm_block->comms_data;
+    int sock = 0;
+    struct sockaddr_in serv_addr;
+
+    if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+        LOG("socket_request_ep_config: socket creation error");
+        return;
+    }
+
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_port = htons(sd->port);
+    inet_pton(AF_INET, sd->address, &serv_addr.sin_addr);
+
+    if (connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
+        LOG("socket_request_ep_config: connect failed, errno=%d", errno);
+        close(sock);
+        return;
+    }
+
+    send_msg(sock, "C|EP");
+    char *resp = receive_msg(sock);
+    close(sock);
+    
+    if (resp && resp[0] == 'C' && resp[1] == '|') {
+        cb_load_ep_config_from_string(resp + 2);
+    }
+    if (resp) free(resp);
+}
+
 CommunicationFunctions* create_socket_communication_functions(const char *address, int port) {
     CommunicationFunctions *comm = (CommunicationFunctions*)malloc(sizeof(CommunicationFunctions));
     comm->send_initial_load = socket_send_initial_load;
     comm->send_delta = socket_send_delta;
+    comm->request_ep_config = socket_request_ep_config;
     SocketCommsData *sd = (SocketCommsData*)malloc(sizeof(SocketCommsData));
     sd->address = strdup(address);
     sd->port = port;
     comm->comms_data = sd;
+    
+    comm->request_ep_config(comm);
     return comm;
 }
 
@@ -215,7 +248,17 @@ void cb_start_server(CodeBuffer *parser_cb, const char *address, int port) {
 
         char *req = receive_msg(new_socket);
         if (req) {
-            if (req[0] == 'I') {
+            if (req[0] == 'C') {
+                const char *config = cb_get_ep_config_string();
+                if (!config) config = "";
+                char *resp = malloc(strlen(config) + 10);
+                sprintf(resp, "C|%s", config);
+                send_msg(new_socket, resp);
+                free(resp);
+                free(req);
+                close(new_socket);
+                continue;
+            } else if (req[0] == 'I') {
                 InitialLoad *load = cb_deserialize_initial_load(req + 2);
                 base_load_initial_content(parser_cb, load);
             } else if (req[0] == 'D') {
@@ -334,6 +377,16 @@ static CB_ParseTree* stdio_send_delta(CommunicationFunctions *comm_block, Delta 
     return tb;
 }
 
+static void stdio_request_ep_config(CommunicationFunctions *comm_block) {
+    StdioCommsData *sd = (StdioCommsData*)comm_block->comms_data;
+    stdio_send_msg(sd->write_fd, "C|EP");
+    char *resp = stdio_receive_msg(sd->read_fd);
+    if (resp && resp[0] == 'C' && resp[1] == '|') {
+        cb_load_ep_config_from_string(resp + 2);
+    }
+    if (resp) free(resp);
+}
+
 CommunicationFunctions* create_stdio_communication_functions(const char *command) {
     int pipe_in[2];  /* Editor -> Parser */
     int pipe_out[2]; /* Parser -> Editor */
@@ -379,11 +432,14 @@ CommunicationFunctions* create_stdio_communication_functions(const char *command
         CommunicationFunctions *comm = (CommunicationFunctions*)malloc(sizeof(CommunicationFunctions));
         comm->send_initial_load = stdio_send_initial_load;
         comm->send_delta = stdio_send_delta;
+        comm->request_ep_config = stdio_request_ep_config;
         StdioCommsData *sd = (StdioCommsData*)malloc(sizeof(StdioCommsData));
         sd->read_fd = pipe_out[0];
         sd->write_fd = pipe_in[1];
         sd->pid = pid;
         comm->comms_data = sd;
+        
+        comm->request_ep_config(comm);
         return comm;
     }
 }
@@ -411,7 +467,16 @@ void cb_start_stdio_server(CodeBuffer *parser_cb) {
             break;
         }
 
-        if (req[0] == 'I') {
+        if (req[0] == 'C') {
+            const char *config = cb_get_ep_config_string();
+            if (!config) config = "";
+            char *resp = malloc(strlen(config) + 10);
+            sprintf(resp, "C|%s", config);
+            stdio_send_msg(STDOUT_FILENO, resp);
+            free(resp);
+            free(req);
+            continue;
+        } else if (req[0] == 'I') {
             InitialLoad *load = cb_deserialize_initial_load(req + 2);
             base_load_initial_content(parser_cb, load);
         } else if (req[0] == 'D') {
