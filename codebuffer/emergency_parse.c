@@ -372,10 +372,10 @@ static void cb_emergency_scan_line(CodeBuffer *cb, int line_idx) {
 
 void cb_seed_ep_rules(CodeBuffer *cb, const char *filename) {
     if (!cb || !filename) return;
-    
+
     EP_Rules *match = NULL;
     const char *ext = strrchr(filename, '.');
-    
+
     if (ext) {
         for (size_t i = 0; i < global_config.count; i++) {
             if (strcmp(global_config.rules[i]->extension, ext) == 0) { match = global_config.rules[i]; break; }
@@ -395,13 +395,11 @@ void cb_seed_ep_rules(CodeBuffer *cb, const char *filename) {
     }
 
     if (match) {
-        LOG("cb_seed_ep_rules: seeding for %s", match->extension);
         if (cb->ep_rules) cb_free_ep_rules(cb->ep_rules);
         cb->ep_rules = copy_ep_rules(match);
         for (size_t i = 0; i < cb->line_count; i++) cb_emergency_scan_line(cb, (int)i);
     }
 }
-
 static void extract_rules_recursive(CodeBuffer *cb, CB_Node *node, EP_Rules *rules) {
     if (!node) return;
 

@@ -328,18 +328,18 @@ void load_initial_content(CodeBuffer *cb, InitialLoad *initial_load) {
     base_load_initial_content(cb, initial_load);
 
     /* Seed EP rules based on filename/id */
-    cb_seed_ep_rules(cb, initial_load->unique_document_id);
+    cb_seed_ep_rules(cb, cb->unique_document_id);
 
     /* Set the snapshot of the content */
     LOG("load_initial_content: taking snapshot");
     snapshot(cb);
 
-    // Highlight the syntax of the editor CodeBuffer
-    LOG("load_initial_content: highlighting syntax");
-    highlight_syntax(cb);
-
     /* Exit the critical section */
     rc = exit_codeblock_critical_section();
+
+    /* Raise parse complete event so the editor redraws immediately with emergency colors */
+    raise_parse_complete_event();
+
     LOG("load_initial_content: finished");
 }
 

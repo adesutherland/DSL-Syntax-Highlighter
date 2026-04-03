@@ -33,7 +33,7 @@ int main(int argc, char *argv[]) {
         "[.toy]\n"
         "keywords=say,int,function,void,call,namespace\n"
         "operators=+, -, *, /, =\n"
-        "line_comment=//\n"
+        "line_comment=//, #\n"
         "block_start=/*\n"
         "block_end=*/\n"
         "quotes=\"\n";
