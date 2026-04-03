@@ -320,15 +320,15 @@ void load_initial_content(CodeBuffer *cb, InitialLoad *initial_load) {
         exit(EXIT_FAILURE);
     }
 
-    /* Seed EP rules based on filename/id */
-    cb_seed_ep_rules(cb, initial_load->unique_document_id);
-
     /* Call Base functionality to Load the Initial Content
      * This sets the local CodeBuffer object, after which the codeblock
      * can be used. It frees the initial load after setting the code buffer.
      */
     LOG("load_initial_content: calling base_load_initial_content");
     base_load_initial_content(cb, initial_load);
+
+    /* Seed EP rules based on filename/id */
+    cb_seed_ep_rules(cb, initial_load->unique_document_id);
 
     /* Set the snapshot of the content */
     LOG("load_initial_content: taking snapshot");

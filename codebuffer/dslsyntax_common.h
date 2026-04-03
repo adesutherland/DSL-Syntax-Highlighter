@@ -455,6 +455,7 @@ CodeBuffer* create_code_buffer(CommunicationFunctions *comm, ParserFunction pars
 
 /* Applying Transactions */
 void editor_apply_transaction(CodeBuffer *cb, Transaction transaction);
+void cb_sync_line(CodeBuffer *cb, int line_index, const char *new_text);
 
 /* Function to take a snapshot of the buffer */
 void snapshot(CodeBuffer *cb);

@@ -1086,3 +1086,84 @@ char* get_code_buffer_source(CodeBuffer *cb) {
 
     return source;
 }
+
+#define MAX_STACK_CHARS 256
+
+void cb_sync_line(CodeBuffer *cb, int line_index, const char *new_text) {
+    if (!cb || line_index < 0 || line_index >= (int)cb->line_count) return;
+
+    CodeBufferLine *line = &cb->lines[line_index];
+    size_t old_len = line->length;
+
+    char32_t stack_old_cp[MAX_STACK_CHARS];
+    char32_t *old_cp = old_len <= MAX_STACK_CHARS ? stack_old_cp : malloc(old_len * sizeof(char32_t));
+    if (!old_cp) return;
+
+    for (size_t i = 0; i < old_len; i++) {
+        old_cp[i] = line->characters[i].heap_character ? line->characters[i].heap_character[0] : line->characters[i].character[0];
+    }
+
+    size_t new_len = 0;
+    const char *temp = new_text ? new_text : "";
+    utf8_int32_t cp;
+    while (*temp) {
+        temp = (const char *)utf8codepoint((const utf8_int8_t *)temp, &cp);
+        new_len++;
+    }
+
+    char32_t stack_new_cp[MAX_STACK_CHARS];
+    char32_t *new_cp = new_len <= MAX_STACK_CHARS ? stack_new_cp : malloc(new_len * sizeof(char32_t));
+    if (!new_cp) {
+        if (old_cp != stack_old_cp) free(old_cp);
+        return;
+    }
+
+    temp = new_text ? new_text : "";
+    for (size_t i = 0; i < new_len; i++) {
+        temp = (const char *)utf8codepoint((const utf8_int8_t *)temp, &cp);
+        new_cp[i] = (char32_t)cp;
+    }
+
+    size_t prefix_len = 0;
+    while (prefix_len < old_len && prefix_len < new_len && old_cp[prefix_len] == new_cp[prefix_len]) {
+        prefix_len++;
+    }
+
+    size_t suffix_len = 0;
+    while (suffix_len < old_len - prefix_len && suffix_len < new_len - prefix_len &&
+           old_cp[old_len - 1 - suffix_len] == new_cp[new_len - 1 - suffix_len]) {
+        suffix_len++;
+    }
+
+    size_t del_count = old_len - prefix_len - suffix_len;
+    if (del_count > 0) {
+        Transaction del_txn = { TRANSACTION_DELETECHARS, line_index, (int)prefix_len, NULL, (int)del_count };
+        editor_apply_transaction(cb, del_txn);
+    }
+
+    size_t add_count = new_len - prefix_len - suffix_len;
+    if (add_count > 0) {
+        const char *add_start = new_text ? new_text : "";
+        for (size_t i = 0; i < prefix_len; i++) {
+            add_start = (const char *)utf8codepoint((const utf8_int8_t *)add_start, &cp);
+        }
+        const char *add_end = add_start;
+        for (size_t i = 0; i < add_count; i++) {
+            add_end = (const char *)utf8codepoint((const utf8_int8_t *)add_end, &cp);
+        }
+        
+        size_t utf8_add_len = add_end - add_start;
+        char stack_add_str[MAX_STACK_CHARS * 4];
+        char *add_str = utf8_add_len < sizeof(stack_add_str) ? stack_add_str : malloc(utf8_add_len + 1);
+        if (add_str) {
+            strncpy(add_str, add_start, utf8_add_len);
+            add_str[utf8_add_len] = '\0';
+            Transaction add_txn = { TRANSACTION_ADDCHARS, line_index, (int)prefix_len, add_str, 0 };
+            editor_apply_transaction(cb, add_txn);
+            if (add_str != stack_add_str) free(add_str);
+        }
+    }
+
+    if (old_cp != stack_old_cp) free(old_cp);
+    if (new_cp != stack_new_cp) free(new_cp);
+}
