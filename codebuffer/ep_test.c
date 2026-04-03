@@ -177,7 +177,7 @@ void test_ep_comment_extension() {
 void test_ep_block_comment_learning() {
     printf("Testing EP Block Comment Learning...\n");
     CodeBuffer *cb = setup_cb("test.toy", "/* new block comment */");
-    
+
     cb->parse_tree = calloc(1, sizeof(CB_ParseTree));
     cb->parse_tree->root = calloc(1, sizeof(CB_Node));
     cb->parse_tree->root->type = PARSE_TREE_FILE;
@@ -197,14 +197,70 @@ void test_ep_block_comment_learning() {
     free_code_buffer(cb);
 }
 
+void test_ep_comma_list_and_escapes() {
+    printf("Testing EP Comma List and Escapes...\n");
+    const char *conf = "[.test]\nkeywords=a,b\noperators=+,-,\\,,*\nline_comment=//,#\n";
+    cb_load_ep_config_from_string(conf);
+
+    CodeBuffer *cb = setup_cb("file.test", "a + , // c");
+    cb_seed_ep_rules(cb, "file.test");
+
+    assert(cb->lines[0].characters[0].token_type == LEXER_KEYWORD); // 'a'
+    assert(cb->lines[0].characters[2].token_type == LEXER_OPERATOR); // '+'
+    assert(cb->lines[0].characters[4].token_type == LEXER_OPERATOR); // ','
+    assert(cb->lines[0].characters[6].token_type == LEXER_COMMENT); // '// c'
+
+    printf("EP Comma List and Escapes test passed!\n");
+    free_code_buffer(cb);
+}
+
+void test_ep_greedy_numerics() {
+    printf("Testing EP Greedy Numerics...\n");
+    CodeBuffer *cb = setup_cb("test.c", "42 3.14 0xFF 100ULL");
+
+    cb_emergency_parse_transaction(cb, (Transaction){TRANSACTION_ADDCHARS, 0, 0, "", 0});
+
+    assert(cb->lines[0].characters[0].token_type == LEXER_NUMBER_LITERAL); // 4
+    assert(cb->lines[0].characters[1].token_type == LEXER_NUMBER_LITERAL); // 2
+    assert(cb->lines[0].characters[3].token_type == LEXER_NUMBER_LITERAL); // 3
+    assert(cb->lines[0].characters[4].token_type == LEXER_NUMBER_LITERAL); // .
+    assert(cb->lines[0].characters[6].token_type == LEXER_NUMBER_LITERAL); // 4
+    assert(cb->lines[0].characters[8].token_type == LEXER_NUMBER_LITERAL); // 0
+    assert(cb->lines[0].characters[9].token_type == LEXER_NUMBER_LITERAL); // x
+    assert(cb->lines[0].characters[13].token_type == LEXER_NUMBER_LITERAL); // 1
+    assert(cb->lines[0].characters[16].token_type == LEXER_NUMBER_LITERAL); // U
+
+    printf("EP Greedy Numerics test passed!\n");
+    free_code_buffer(cb);
+}
+
+void test_ep_ident_extra_chars() {
+    printf("Testing EP Ident Extra Chars...\n");
+    const char *conf = "[.test2]\nkeywords=if\nident_extra_chars=$\n";
+    cb_load_ep_config_from_string(conf);
+
+    CodeBuffer *cb = setup_cb("file.test2", "if $var");
+    cb_seed_ep_rules(cb, "file.test2");
+
+    assert(cb->lines[0].characters[0].token_type == LEXER_KEYWORD); // 'if'
+    assert(cb->lines[0].characters[3].token_type == LEXER_IDENTIFIER); // '$'
+    assert(cb->lines[0].characters[4].token_type == LEXER_IDENTIFIER); // 'v'
+
+    printf("EP Ident Extra Chars test passed!\n");
+    free_code_buffer(cb);
+}
+
 int main() {
-    cb_debug_enabled = 1;
     test_ep_learning_comprehensive();
     test_ep_block_comment_learning();
     test_ep_preservation();
     test_ep_boundaries();
     test_ep_comment_extension();
     test_ep_config_seeding();
+    test_ep_comma_list_and_escapes();
+    test_ep_greedy_numerics();
+    test_ep_ident_extra_chars();
+
     printf("All enhanced EP tests passed successfully!\n");
     return 0;
 }

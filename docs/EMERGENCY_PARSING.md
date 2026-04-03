@@ -43,3 +43,25 @@ Emergency parsing is **temporary**. Once the parser server returns a perfectly a
 2. The new, authoritative AST is applied to the buffer.
 3. The learner extracts any new rules.
 4. The buffer is completely re-highlighted with 100% accuracy, and any heuristic guesses made in the interim are replaced by authoritative tokens.
+
+## 6. Configuring Emergency Rules (Parser Developers)
+For new parser development, the background parser should respond to the `C|EP` init message with a static configuration string defining the EP rules. This ensures instant syntax highlighting out-of-the-box before the first full parse finishes.
+
+### Config Format
+The configuration uses an INI-style syntax, sent by the parser using `cb_set_ep_config_string()`.
+
+```ini
+[.myext]
+keywords=function,void,int,string
+operators=+,-,*,/,=,:,{,},\,     # Use \, to escape a literal comma operator
+line_comment=//,#                # Supports multiple comment styles separated by comma
+block_start=/*
+block_end=*/
+ident_extra_chars=$@             # Characters (beyond alphanumeric/underscore) allowed in identifiers
+quotes="'                        # Characters that start/end string literals
+```
+
+### Key Behaviors
+- **Multiple Values:** `keywords`, `operators`, and `line_comment` support comma-separated lists. To define a comma `,` as an operator, escape it with a backslash `\,`.
+- **Greedy Numerics:** The EP scanner automatically and greedily consumes numeric literals starting with `0-9` (including hex, floats, and suffixes like `ULL`) without needing any configuration.
+- **Identifiers:** Any word matching the C-style identifier pattern `[a-zA-Z_][a-zA-Z0-9_]*` that is *not* found in the `keywords` list is automatically highlighted as `LEXER_IDENTIFIER`. To support languages with extra characters in variable names (like PHP's `$var` or Lisp's `my-var`), add them to `ident_extra_chars`.

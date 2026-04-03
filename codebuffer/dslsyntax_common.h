@@ -291,6 +291,7 @@ typedef struct EP_Rules {
     char *string_quotes;
     size_t string_quote_count;
     int is_positional; // e.g., Python-style indentation
+    char *ident_extra_chars; // Extra characters allowed in identifiers (e.g. "$", "-", etc.)
 } EP_Rules;
 
 /* Structure of the main shared code buffer, synced between editor and parser */

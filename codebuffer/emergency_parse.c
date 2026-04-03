@@ -60,6 +60,7 @@ void cb_free_ep_rules(EP_Rules *rules) {
     free(rules->block_comment_starts);
     if (rules->block_comment_ends) free(rules->block_comment_ends);
     free(rules->string_quotes);
+    if (rules->ident_extra_chars) free(rules->ident_extra_chars);
     free(rules);
 }
 
@@ -113,6 +114,7 @@ static EP_Rules* copy_ep_rules(EP_Rules *src) {
     }
     for (size_t i = 0; i < src->string_quote_count; i++) add_unique_char(&dst->string_quotes, &dst->string_quote_count, src->string_quotes[i]);
     dst->is_positional = src->is_positional;
+    if (src->ident_extra_chars) dst->ident_extra_chars = strdup(src->ident_extra_chars);
     sort_operators(dst);
     return dst;
 }
@@ -126,6 +128,27 @@ void cb_set_ep_config_string(const char *str) {
 
 const char *cb_get_ep_config_string(void) {
     return global_ep_config_string;
+}
+
+static void parse_comma_list(char ***list, size_t *count, char *val) {
+    char *start = val;
+    char *curr = val;
+    while (*curr) {
+        if (*curr == '\\' && *(curr + 1) == ',') {
+            memmove(curr, curr + 1, strlen(curr));
+            curr++;
+        } else if (*curr == ',') {
+            *curr = '\0';
+            add_unique_string(list, count, start);
+            start = curr + 1;
+            curr++;
+        } else {
+            curr++;
+        }
+    }
+    if (*start) {
+        add_unique_string(list, count, start);
+    }
 }
 
 void cb_load_ep_config_from_string(const char *config_str) {
@@ -162,14 +185,12 @@ void cb_load_ep_config_from_string(const char *config_str) {
                 while (vend > val && isspace(*vend)) { *vend = '\0'; vend--; }
 
                 if (strcmp(l, "keywords") == 0) {
-                    char *tok = strtok_r(val, ",", &val);
-                    while (tok) { add_unique_string(&current->keywords, &current->keyword_count, tok); tok = strtok_r(NULL, ",", &val); }
+                    parse_comma_list(&current->keywords, &current->keyword_count, val);
                 } else if (strcmp(l, "operators") == 0) {
-                    char *tok = strtok_r(val, ",", &val);
-                    while (tok) { add_unique_string(&current->operators, &current->operator_count, tok); tok = strtok_r(NULL, ",", &val); }
+                    parse_comma_list(&current->operators, &current->operator_count, val);
                     sort_operators(current);
                 } else if (strcmp(l, "line_comment") == 0) {
-                    add_unique_string(&current->line_comment_starts, &current->line_comment_count, val);
+                    parse_comma_list(&current->line_comment_starts, &current->line_comment_count, val);
                 } else if (strcmp(l, "block_start") == 0) {
                     if (add_unique_string(&current->block_comment_starts, &current->block_comment_count, val)) {
                         current->block_comment_ends = realloc(current->block_comment_ends, sizeof(char*) * current->block_comment_count);
@@ -185,6 +206,8 @@ void cb_load_ep_config_from_string(const char *config_str) {
                     current->is_positional = atoi(val);
                 } else if (strcmp(l, "shebang") == 0) {
                     current->shebang_pattern = strdup(val);
+                } else if (strcmp(l, "ident_extra_chars") == 0) {
+                    current->ident_extra_chars = strdup(val);
                 }
             }
         }
@@ -309,7 +332,20 @@ static void cb_emergency_scan_line(CodeBuffer *cb, int line_idx) {
         if (c->token_type == LEXER_WHITESPACE) continue;
 
         if (!in_string && !in_comment) {
-            if (cp >= '0' && cp <= '9') { c->token_type = LEXER_NUMBER_LITERAL; continue; }
+            if (cp >= '0' && cp <= '9') {
+                while (i < line->length) {
+                    char next_cp = (char)line->characters[i].character[0];
+                    if (line->characters[i].node != NULL) break;
+                    if (isalnum(next_cp) || next_cp == '.' || next_cp == '_') {
+                        line->characters[i].token_type = LEXER_NUMBER_LITERAL;
+                        i++;
+                    } else {
+                        break;
+                    }
+                }
+                i--;
+                goto next_char;
+            }
         }
 
         if (!in_string && !in_comment && rules) {
@@ -330,38 +366,45 @@ static void cb_emergency_scan_line(CodeBuffer *cb, int line_idx) {
                 }
             }
 
-            /* Match keywords (Whole word boundary check) */
-            if (isalpha((char)cp) || cp == '_') {
-                int valid_start = (i == 0 || line->characters[i-1].node != NULL || (!isalnum((char)line->characters[i-1].character[0]) && line->characters[i-1].character[0] != '_'));
-                if (valid_start) {
+            /* Match keywords and identifiers (Whole word boundary check) */
+            int is_ident_char = isalpha((char)cp) || cp == '_';
+            if (!is_ident_char && rules->ident_extra_chars && strchr(rules->ident_extra_chars, (char)cp)) is_ident_char = 1;
+
+            if (is_ident_char) {
+                int prev_is_ident = 0;
+                if (i > 0 && line->characters[i-1].node == NULL) {
+                    char prev_cp = (char)line->characters[i-1].character[0];
+                    if (isalnum(prev_cp) || prev_cp == '_') prev_is_ident = 1;
+                    else if (rules->ident_extra_chars && strchr(rules->ident_extra_chars, prev_cp)) prev_is_ident = 1;
+                }
+                
+                if (!prev_is_ident) {
                     size_t start_i = i;
-                    while (i < line->length && (isalnum((char)line->characters[i].character[0]) || line->characters[i].character[0] == '_')) {
+                    while (i < line->length) {
                         if (line->characters[i].node != NULL) break;
+                        char next_cp = (char)line->characters[i].character[0];
+                        int next_is_ident = isalnum(next_cp) || next_cp == '_';
+                        if (!next_is_ident && rules->ident_extra_chars && strchr(rules->ident_extra_chars, next_cp)) next_is_ident = 1;
+                        if (!next_is_ident) break;
                         i++;
                     }
-                    int valid_end = (i == line->length || line->characters[i].node != NULL || (!isalnum((char)line->characters[i].character[0]) && line->characters[i].character[0] != '_'));
-                    if (valid_end) {
-                        size_t len = i - start_i;
-                        char *word = malloc(len + 1);
-                        for (size_t wi = 0; wi < len; wi++) word[wi] = (char)line->characters[start_i+wi].character[0];
-                        word[len] = '\0';
-                        int is_kw = 0;
-                        for (size_t k = 0; k < rules->keyword_count; k++) {
-                            if (strcmp(rules->keywords[k], word) == 0) { is_kw = 1; break; }
-                        }
-                        if (is_kw) {
-                            for (size_t wi = 0; wi < len; wi++) { line->characters[start_i+wi].token_type = LEXER_KEYWORD; }
-                        }
-                        free(word);
+                    
+                    size_t len = i - start_i;
+                    char *word = malloc(len + 1);
+                    for (size_t wi = 0; wi < len; wi++) word[wi] = (char)line->characters[start_i+wi].character[0];
+                    word[len] = '\0';
+                    
+                    int is_kw = 0;
+                    for (size_t k = 0; k < rules->keyword_count; k++) {
+                        if (strcmp(rules->keywords[k], word) == 0) { is_kw = 1; break; }
                     }
+                    
+                    for (size_t wi = 0; wi < len; wi++) { 
+                        line->characters[start_i+wi].token_type = is_kw ? LEXER_KEYWORD : LEXER_IDENTIFIER; 
+                    }
+                    
+                    free(word);
                     i--; /* backtrack for loop increment */
-                    goto next_char;
-                } else {
-                    while (i < line->length && (isalnum((char)line->characters[i].character[0]) || line->characters[i].character[0] == '_')) {
-                        if (line->characters[i].node != NULL) break;
-                        i++;
-                    }
-                    i--;
                     goto next_char;
                 }
             }

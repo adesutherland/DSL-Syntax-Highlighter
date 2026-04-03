@@ -32,10 +32,11 @@ int main(int argc, char *argv[]) {
     const char *toy_config = 
         "[.toy]\n"
         "keywords=say,int,function,void,call,namespace\n"
-        "operators=+, -, *, /, =\n"
-        "line_comment=//, #\n"
+        "operators=+,-,*,/,=,:,(,),{,},\\,\n"
+        "line_comment=//,#\n"
         "block_start=/*\n"
         "block_end=*/\n"
+        "ident_extra_chars=$\n"
         "quotes=\"\n";
     cb_set_ep_config_string(toy_config);
 
