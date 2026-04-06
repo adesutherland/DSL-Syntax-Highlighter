@@ -37,7 +37,7 @@ add_library(dslsyntax_parser
 add_executable(code_test test.c)
 target_link_libraries(code_test dslsyntax_editor dslsyntax_parser)
 target_link_libraries(code_test highlighter)
-target_include_directories(code_test PRIVATE . ${CMAKE_SOURCE_DIR}/toyparser)
+target_include_directories(code_test PRIVATE . ${DSL_Syntax_Highlighter_SOURCE_DIR}/toyparser)
 
 add_executable(token_test token_test.c)
 target_link_libraries(token_test dslsyntax_parser)
