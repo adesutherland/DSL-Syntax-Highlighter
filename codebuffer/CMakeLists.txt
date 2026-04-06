@@ -33,37 +33,39 @@ add_library(dslsyntax_parser
         dslsyntax_parser.c 
         dslsyntax_parser.h)
 
-# Test programs
-add_executable(code_test test.c)
-target_link_libraries(code_test dslsyntax_editor dslsyntax_parser)
-target_link_libraries(code_test highlighter)
-target_include_directories(code_test PRIVATE . ${DSL_Syntax_Highlighter_SOURCE_DIR}/toyparser)
+if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
+    # Test programs
+    add_executable(code_test test.c)
+    target_link_libraries(code_test dslsyntax_editor dslsyntax_parser)
+    target_link_libraries(code_test highlighter)
+    target_include_directories(code_test PRIVATE . ${DSL_Syntax_Highlighter_SOURCE_DIR}/toyparser)
 
-add_executable(token_test token_test.c)
-target_link_libraries(token_test dslsyntax_parser)
+    add_executable(token_test token_test.c)
+    target_link_libraries(token_test dslsyntax_parser)
 
-add_executable(serialization_test serialization_test.c)
-target_link_libraries(serialization_test dslsyntax_parser)
+    add_executable(serialization_test serialization_test.c)
+    target_link_libraries(serialization_test dslsyntax_parser)
 
-add_executable(socket_test socket_test.c)
-target_link_libraries(socket_test dslsyntax_parser pthread)
+    add_executable(socket_test socket_test.c)
+    target_link_libraries(socket_test dslsyntax_parser pthread)
 
-add_executable(diff_test diff_test.c)
-target_link_libraries(diff_test dslsyntax_editor)
+    add_executable(diff_test diff_test.c)
+    target_link_libraries(diff_test dslsyntax_editor)
 
-add_executable(ep_test ep_test.c)
-target_link_libraries(ep_test dslsyntax_editor)
+    add_executable(ep_test ep_test.c)
+    target_link_libraries(ep_test dslsyntax_editor)
 
-add_executable(fake_editor fake_editor.c)
-target_link_libraries(fake_editor dslsyntax_editor)
+    add_executable(fake_editor fake_editor.c)
+    target_link_libraries(fake_editor dslsyntax_editor)
 
-add_executable(fake_parser fake_parser.c)
-target_link_libraries(fake_parser dslsyntax_parser)
+    add_executable(fake_parser fake_parser.c)
+    target_link_libraries(fake_parser dslsyntax_parser)
 
-# --- Automated Testing ---
-enable_testing()
+    # --- Automated Testing ---
+    enable_testing()
 
-add_test(NAME serialization_test COMMAND serialization_test)
-add_test(NAME socket_test COMMAND socket_test)
-add_test(NAME diff_test COMMAND diff_test)
-add_test(NAME ep_test COMMAND ep_test)
+    add_test(NAME serialization_test COMMAND serialization_test)
+    add_test(NAME socket_test COMMAND socket_test)
+    add_test(NAME diff_test COMMAND diff_test)
+    add_test(NAME ep_test COMMAND ep_test)
+endif()
