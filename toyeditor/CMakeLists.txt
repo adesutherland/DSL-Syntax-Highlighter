@@ -15,3 +15,6 @@ target_link_libraries(te ${CURSES_LIBRARY})
 target_link_libraries(te dslsyntax_editor)
 target_link_libraries(te dslsyntax_parser)
 target_link_libraries(te highlighter)
+
+# Install target
+install(TARGETS te DESTINATION bin)
