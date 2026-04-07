@@ -1323,3 +1323,71 @@ const char* transaction_type_to_string(TransactionType type) {
         default: return "INVALID";
     }
 }
+
+/* Helper to find a matching bracket node (LH <-> RH) */
+CB_Node* cb_find_matching_bracket(CB_Node *bracket_node) {
+    if (!bracket_node || !bracket_node->parent) return NULL;
+    
+    CB_NodeType target_type = 0;
+    int direction = 0;
+    switch (bracket_node->type) {
+        case LEXER_LH_CODEBLOCK: target_type = LEXER_RH_CODEBLOCK; direction = 1; break;
+        case LEXER_RH_CODEBLOCK: target_type = LEXER_LH_CODEBLOCK; direction = -1; break;
+        case LEXER_LH_EXPR:      target_type = LEXER_RH_EXPR; direction = 1; break;
+        case LEXER_RH_EXPR:      target_type = LEXER_LH_EXPR; direction = -1; break;
+        case LEXER_LH_BLOCK:     target_type = LEXER_RH_BLOCK; direction = 1; break;
+        case LEXER_RH_BLOCK:     target_type = LEXER_LH_BLOCK; direction = -1; break;
+        default: return NULL;
+    }
+
+    if (direction == 1) {
+        int depth = 1;
+        CB_Node *curr = bracket_node->sibling;
+        while (curr) {
+            if (curr->type == bracket_node->type) depth++;
+            else if (curr->type == target_type) {
+                depth--;
+                if (depth == 0) return curr;
+            }
+            curr = curr->sibling;
+        }
+    } else {
+        CB_Node *curr = bracket_node->parent->child;
+        CB_Node *stack[256];
+        int top = 0;
+        while (curr && curr != bracket_node) {
+            if (curr->type == target_type) {
+                if (top < 256) stack[top++] = curr;
+            } else if (curr->type == bracket_node->type) {
+                if (top > 0) top--;
+            }
+            curr = curr->sibling;
+        }
+        if (top > 0) return stack[top - 1];
+    }
+    return NULL;
+}
+
+/* Helper to accurately get the start and end line (0-based) for a subtree */
+void cb_get_subtree_line_bounds(CodeBuffer *cb, CB_Node *node, int *start_line, int *end_line) {
+    if (!cb || !node || !start_line || !end_line) return;
+    
+    *start_line = -1;
+    *end_line = -1;
+
+    size_t line1 = 0, col1 = 0;
+    get_code_buffer_part(cb, node->pos, 1, &line1, &col1, NULL);
+    if (line1 > 0 && line1 <= cb->line_count) {
+        *start_line = (int)(line1 - 1);
+    }
+
+    size_t line2 = 0, col2 = 0;
+    if (node->length > 0) {
+        get_code_buffer_part(cb, node->pos + node->length - 1, 1, &line2, &col2, NULL);
+        if (line2 > 0 && line2 <= cb->line_count) {
+            *end_line = (int)(line2 - 1);
+        }
+    } else {
+        *end_line = *start_line;
+    }
+}

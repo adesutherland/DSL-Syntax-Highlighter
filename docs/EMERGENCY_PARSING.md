@@ -1,9 +1,8 @@
 # Emergency Parsing Rules
 
-Emergency Parsing (EP) is a core platform feature of SDSLH that provides immediate, heuristic visual feedback to users while a full parse is being performed asynchronously by the server. 
+Emergency Parsing (EP) is a core platform feature of DSLSH that provides immediate, heuristic visual feedback to users while a full parse is being performed asynchronously by the server.
 
 Because it must be fast and execute before the parser finishes, the emergency parsing engine has been completely redesigned into a **Data-Driven, "Do No Harm" System**.
-
 ## 1. The "Do No Harm" Principle (Immutable Parsed Nodes)
 The most critical rule of Emergency Parsing is that it **never overrides an authoritatively parsed token**. 
 If a character has been assigned a valid `node` pointer by the background parser, the Emergency Parser treats it as an immutable "wall." It will read the character to maintain state (e.g., to know if it's inside a string or comment), but it will never change its `token_type` or color.

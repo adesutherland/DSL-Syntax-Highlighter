@@ -657,4 +657,10 @@ void base_apply_transaction(CodeBuffer *cb, Transaction transaction);
  */
 void cb_emergency_parse_transaction(CodeBuffer *cb, Transaction transaction);
 
+/* Helper to find a matching bracket node (LH <-> RH) */
+CB_Node* cb_find_matching_bracket(CB_Node *bracket_node);
+
+/* Helper to accurately get the start and end line (0-based) for a subtree */
+void cb_get_subtree_line_bounds(CodeBuffer *cb, CB_Node *node, int *start_line, int *end_line);
+
 #endif /* TOKEN_BUFFER_H */

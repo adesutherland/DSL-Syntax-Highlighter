@@ -1,7 +1,7 @@
-# Gemini CLI: SDSLH Project Guide
+# Gemini CLI: DSLSH Project Guide
 
 ## Project Context
-The **DSL Syntax Highlighter (SDSLH)** is a C library providing a platform for synchronized syntax highlighting between an editor and a language parser.
+The **DSL Syntax Highlighter (DSLSH)** is a C library providing a platform for synchronized syntax highlighting between an editor and a language parser.
 
 ## Directory Structure
 - `codebuffer/`: Core library (the "Platform"). Handles synchronization, threading, and transport.

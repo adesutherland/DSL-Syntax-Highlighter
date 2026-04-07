@@ -1,12 +1,12 @@
 # DSL Syntax Highlighter: Architecture and Design
 
 ## 1. Overview
-The DSL Syntax Highlighter (SDSLH) is a C-based platform designed to decouple language parsing from text editing. It provides a robust synchronization layer that allows editors to receive high-fidelity, hierarchical syntax highlighting from out-of-process parsers with zero-latency visual feedback.
+The DSL Syntax Highlighter (DSLSH) is a C-based platform designed to decouple language parsing from text editing. It provides a robust synchronization layer that allows editors to receive high-fidelity, hierarchical syntax highlighting from out-of-process parsers with zero-latency visual feedback.
 
 ## 2. Core Architectural Patterns
 
 ### 2.1 Delta-Based Synchronization
-Instead of sending full document buffers on every change, SDSLH uses an atomic **Transaction** model. Every edit (character addition, line deletion, etc.) is captured as a transaction. These are bundled into **Deltas** and synchronized over a network socket.
+Instead of sending full document buffers on every change, DSLSH uses an atomic **Transaction** model. Every edit (character addition, line deletion, etc.) is captured as a transaction. These are bundled into **Deltas** and synchronized over a network socket.
 
 ### 2.2 Double-Buffered State
 Both the Editor (Client) and the Parser (Server) maintain a symmetric **CodeBuffer**.

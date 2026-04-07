@@ -1,8 +1,8 @@
-# DSL Syntax Highlighter (SDSLH)
+# DSL Syntax Highlighter (DSLSH)
 
 **The Bridge between Language Parsers and Modern Editors.**
 
-SDSLH is a high-performance C-based platform that decouples language intelligence from text editing. It provides the essential "plumbing"—synchronization, threading, and IPC—required to build responsive, IDE-grade syntax highlighting and structural analysis.
+DSLSH is a high-performance C-based platform that decouples language intelligence from text editing. It provides the essential "plumbing"—synchronization, threading, and IPC—required to build responsive, IDE-grade syntax highlighting and structural analysis.
 
 ## 🚀 Key Capabilities
 - **Zero-Latency Visuals**: Our **Emergency Parsing** engine provides instant heuristic highlighting on the client while the full parser works in the background.
@@ -19,7 +19,7 @@ SDSLH is a high-performance C-based platform that decouples language intelligenc
 
 ## 📚 Documentation
 - **[Architecture & Design](docs/ARCHITECTURE.md)**: The "Why" and "How" of the system.
-- **[Emergency Parsing Rules](docs/EMERGENCY_PARSING.md)**: How SDSLH maintains visual accuracy during edits.
+- **[Emergency Parsing Rules](docs/EMERGENCY_PARSING.md)**: How DSLSH maintains visual accuracy during edits.
 - **[Protocol Specification](docs/PROTOCOL.md)**: Details on the socket-based message format.
 - **[Editor Integration Guide](docs/EDITOR_INTEGRATION.md)**: How to connect your editor to the platform.
 - **[Parser Integration Guide](docs/PARSER_INTEGRATION.md)**: How to build a language server.

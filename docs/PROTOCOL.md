@@ -1,9 +1,9 @@
-# DSL Syntax Highlighter Protocol (SDSLH)
+# DSL Syntax Highlighter Protocol (DSLSH)
 
 This document defines the communication protocol between a text editor (client) and a language parser (server).
 
 ## 1. Transport Layer
-SDSLH supports two primary transport methods for out-of-process communication:
+DSLSH supports two primary transport methods for out-of-process communication:
 
 ### 1.1 STDIN/STDOUT (Default)
 This is the recommended transport for local language parsers. The editor launches the parser as a child process and communicates via pipes.
