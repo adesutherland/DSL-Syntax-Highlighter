@@ -34,6 +34,11 @@ cmake ..
 cmake --build .
 ```
 
+On Windows, `toyeditor` is only built when a vendored `PDCursesMod` checkout is
+present at `third_party/PDCursesMod`. When present, it is linked statically
+using the `wincon` backend. Use a current release and keep the default source
+layout intact.
+
 ### 2. Run Automated Tests
 ```bash
 ctest

@@ -7,6 +7,17 @@
 #include "dslsyntax_log.h"
 //#include "ast.h"
 
+static char *parser_strndup(const char *source, size_t length) {
+    char *copy = malloc(length + 1);
+    if (!copy) {
+        return NULL;
+    }
+
+    memcpy(copy, source, length);
+    copy[length] = '\0';
+    return copy;
+}
+
 /* Global variables for simplicity */
 // ParserToken linked list head and tail
 ParserToken *head = NULL;
@@ -120,7 +131,7 @@ ParserToken* lexer_number(Lexer *lexer) {
         lexer_advance(lexer);
     }
     size_t length = lexer->pos - start_pos;
-    char *number_str = strndup(lexer->text + start_pos, length);
+    char *number_str = parser_strndup(lexer->text + start_pos, length);
 
     ParserToken* token = add_token(PARSER_TOKEN_NUMBER, 1, number_str, start_pos, length, start_line, start_column, lexer->line, lexer->column);
     free(number_str); // Free the number string after adding the token
@@ -136,7 +147,7 @@ ParserToken *lexer_identifier(Lexer *lexer) {
         lexer_advance(lexer);
     }
     size_t length = lexer->pos - start_pos;
-    char *id_str = strndup(lexer->text + start_pos, length);
+    char *id_str = parser_strndup(lexer->text + start_pos, length);
 
     ParserTokenType type = PARSER_TOKEN_IDENTIFIER;
     if (strcmp(id_str, "int") == 0) {
@@ -162,7 +173,7 @@ ParserToken *lexer_string(Lexer *lexer) {
     }
     if (lexer->current_char == quote) {
         size_t length = lexer->pos - start_pos + 1;
-        char *string_str = strndup(lexer->text + start_pos, length);
+        char *string_str = parser_strndup(lexer->text + start_pos, length);
         lexer_advance(lexer); // Skip the closing quote
 
         ParserToken *token;

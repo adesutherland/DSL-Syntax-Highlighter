@@ -33,6 +33,11 @@ add_library(dslsyntax_parser
         dslsyntax_parser.c 
         dslsyntax_parser.h)
 
+if(WIN32)
+    target_link_libraries(dslsyntax_editor PUBLIC ws2_32)
+    target_link_libraries(dslsyntax_parser PUBLIC ws2_32)
+endif()
+
 if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
     # Test programs
     add_executable(code_test test.c)
@@ -46,9 +51,6 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
     add_executable(serialization_test serialization_test.c)
     target_link_libraries(serialization_test dslsyntax_parser)
 
-    add_executable(socket_test socket_test.c)
-    target_link_libraries(socket_test dslsyntax_parser pthread)
-
     add_executable(diff_test diff_test.c)
     target_link_libraries(diff_test dslsyntax_editor)
 
@@ -61,11 +63,19 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
     add_executable(fake_parser fake_parser.c)
     target_link_libraries(fake_parser dslsyntax_parser)
 
+    if(NOT WIN32)
+        add_executable(socket_test socket_test.c)
+        target_link_libraries(socket_test dslsyntax_parser pthread)
+    endif()
+
     # --- Automated Testing ---
     enable_testing()
 
     add_test(NAME serialization_test COMMAND serialization_test)
-    add_test(NAME socket_test COMMAND socket_test)
     add_test(NAME diff_test COMMAND diff_test)
     add_test(NAME ep_test COMMAND ep_test)
+
+    if(NOT WIN32)
+        add_test(NAME socket_test COMMAND socket_test)
+    endif()
 endif()

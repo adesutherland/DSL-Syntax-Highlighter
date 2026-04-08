@@ -120,7 +120,9 @@ void destroy_thread_utils(void) {
         pthread_mutex_destroy(&parse_complete_event.event_mutex);
 #endif
         parse_complete_event.initialized = 0;
-        parse_complete_event.is_set = 0; /* Redundant for Win, good for POSIX consistency after destroy */
+#ifndef _WIN32
+        parse_complete_event.is_set = 0;
+#endif
     }
 }
 
@@ -236,7 +238,7 @@ int editor_is_parsing_thread_active(void) {
 }
 
 #ifdef _WIN32
-static DWORD THREAD_CALLCONV parser_thread_wrapper(LPVOID arg_wrapper_pv) {
+static DWORD WINAPI parser_thread_wrapper(LPVOID arg_wrapper_pv) {
 #else
 static void* parser_thread_wrapper(void *arg_wrapper_pv) {
 #endif

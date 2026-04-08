@@ -1,17 +1,34 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <windows.h>
+#else
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <unistd.h>
-#include <errno.h>
 #include <signal.h>
+#include <sys/wait.h>
+#endif
+#include <errno.h>
 
 #include "dslsyntax_common.h"
 #include "dslsyntax_parser.h"
 #include "serialization.h"
 #include "dslsyntax_log.h"
+
+#ifdef _WIN32
+#define CLOSE_SOCKET closesocket
+typedef SOCKET SocketHandle;
+#define INVALID_SOCKET_HANDLE INVALID_SOCKET
+#else
+#define CLOSE_SOCKET close
+typedef int SocketHandle;
+#define INVALID_SOCKET_HANDLE (-1)
+#endif
 
 /* --- In-Process Comms --- */
 
@@ -60,12 +77,12 @@ void free_inproc_communication_functions(CommunicationFunctions *comm) {
 
 /* --- Socket Transport Utilities --- */
 
-static int send_all(int sock, const char *buf, size_t len) {
+static int send_all(SocketHandle sock, const char *buf, size_t len) {
     size_t total = 0;
     while (total < len) {
-        ssize_t n = send(sock, buf + total, len - total, 0);
+        int n = send(sock, buf + total, (int)(len - total), 0);
         if (n <= 0) {
-            LOG("send_all: failed, n=%zd, errno=%d", n, errno);
+            LOG("send_all: failed, n=%d, errno=%d", n, errno);
             return -1;
         }
         total += n;
@@ -73,16 +90,28 @@ static int send_all(int sock, const char *buf, size_t len) {
     return 0;
 }
 
-static char* receive_msg(int sock) {
+static int recv_all(SocketHandle sock, char *buf, size_t len) {
+    size_t total = 0;
+    while (total < len) {
+        int n = recv(sock, buf + total, (int)(len - total), 0);
+        if (n <= 0) {
+            return -1;
+        }
+        total += n;
+    }
+    return 0;
+}
+
+static char* receive_msg(SocketHandle sock) {
     char len_hex[9];
-    if (recv(sock, len_hex, 8, MSG_WAITALL) != 8) {
+    if (recv_all(sock, len_hex, 8) < 0) {
         return NULL;
     }
     len_hex[8] = '\0';
     uint32_t len;
     if (sscanf(len_hex, "%x", &len) != 1) return NULL;
     char *buf = (char*)malloc(len + 1);
-    if (recv(sock, buf, len, MSG_WAITALL) != (ssize_t)len) {
+    if (recv_all(sock, buf, len) < 0) {
         free(buf);
         return NULL;
     }
@@ -90,7 +119,26 @@ static char* receive_msg(int sock) {
     return buf;
 }
 
-static int send_msg(int sock, const char *msg) {
+#ifdef _WIN32
+static int ensure_winsock_initialized(void) {
+    static int initialized = 0;
+
+    if (initialized) {
+        return 0;
+    }
+
+    WSADATA wsa_data;
+    if (WSAStartup(MAKEWORD(2, 2), &wsa_data) != 0) {
+        LOG("WSAStartup failed");
+        return -1;
+    }
+
+    initialized = 1;
+    return 0;
+}
+#endif
+
+static int send_msg(SocketHandle sock, const char *msg) {
     uint32_t len = strlen(msg);
     char len_hex[9];
     sprintf(len_hex, "%08x", len);
@@ -108,15 +156,23 @@ typedef struct {
 static CB_ParseTree* socket_send_initial_load(CommunicationFunctions *comm_block, InitialLoad *initial_load) {
     SocketCommsData *sd = (SocketCommsData*)comm_block->comms_data;
     LOG("socket_send_initial_load: connecting to %s:%d", sd->address, sd->port);
-    int sock = socket(AF_INET, SOCK_STREAM, 0);
+#ifdef _WIN32
+    if (ensure_winsock_initialized() != 0) {
+        return NULL;
+    }
+#endif
+    SocketHandle sock = socket(AF_INET, SOCK_STREAM, 0);
     struct sockaddr_in serv_addr;
+    memset(&serv_addr, 0, sizeof(serv_addr));
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_port = htons(sd->port);
     inet_pton(AF_INET, sd->address, &serv_addr.sin_addr);
 
-    if (connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
+    if (sock == INVALID_SOCKET_HANDLE || connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
         LOG("socket_send_initial_load: connect failed, errno=%d", errno);
-        close(sock);
+        if (sock != INVALID_SOCKET_HANDLE) {
+            CLOSE_SOCKET(sock);
+        }
         return NULL;
     }
 
@@ -128,7 +184,7 @@ static CB_ParseTree* socket_send_initial_load(CommunicationFunctions *comm_block
     free(full_req);
 
     char *resp = receive_msg(sock);
-    close(sock);
+    CLOSE_SOCKET(sock);
     if (!resp) return NULL;
 
     CB_TokenStream *stream = cb_deserialize_token_stream(resp);
@@ -140,14 +196,22 @@ static CB_ParseTree* socket_send_initial_load(CommunicationFunctions *comm_block
 
 static CB_ParseTree* socket_send_delta(CommunicationFunctions *comm_block, Delta *delta) {
     SocketCommsData *sd = (SocketCommsData*)comm_block->comms_data;
-    int sock = socket(AF_INET, SOCK_STREAM, 0);
+#ifdef _WIN32
+    if (ensure_winsock_initialized() != 0) {
+        return NULL;
+    }
+#endif
+    SocketHandle sock = socket(AF_INET, SOCK_STREAM, 0);
     struct sockaddr_in serv_addr;
+    memset(&serv_addr, 0, sizeof(serv_addr));
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_port = htons(sd->port);
     inet_pton(AF_INET, sd->address, &serv_addr.sin_addr);
 
-    if (connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
-        close(sock);
+    if (sock == INVALID_SOCKET_HANDLE || connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
+        if (sock != INVALID_SOCKET_HANDLE) {
+            CLOSE_SOCKET(sock);
+        }
         return NULL;
     }
 
@@ -159,7 +223,7 @@ static CB_ParseTree* socket_send_delta(CommunicationFunctions *comm_block, Delta
     free(full_req);
 
     char *resp = receive_msg(sock);
-    close(sock);
+    CLOSE_SOCKET(sock);
     if (!resp) return NULL;
 
     CB_TokenStream *stream = cb_deserialize_token_stream(resp);
@@ -171,27 +235,35 @@ static CB_ParseTree* socket_send_delta(CommunicationFunctions *comm_block, Delta
 
 static void socket_request_ep_config(CommunicationFunctions *comm_block) {
     SocketCommsData *sd = (SocketCommsData*)comm_block->comms_data;
-    int sock = 0;
+    SocketHandle sock = INVALID_SOCKET_HANDLE;
     struct sockaddr_in serv_addr;
 
-    if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+#ifdef _WIN32
+    if (ensure_winsock_initialized() != 0) {
+        return;
+    }
+#endif
+
+    sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock == INVALID_SOCKET_HANDLE) {
         LOG("socket_request_ep_config: socket creation error");
         return;
     }
 
+    memset(&serv_addr, 0, sizeof(serv_addr));
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_port = htons(sd->port);
     inet_pton(AF_INET, sd->address, &serv_addr.sin_addr);
 
     if (connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
         LOG("socket_request_ep_config: connect failed, errno=%d", errno);
-        close(sock);
+        CLOSE_SOCKET(sock);
         return;
     }
 
     send_msg(sock, "C|EP");
     char *resp = receive_msg(sock);
-    close(sock);
+    CLOSE_SOCKET(sock);
     
     if (resp && resp[0] == 'C' && resp[1] == '|') {
         cb_load_ep_config_from_string(resp + 2);
@@ -216,16 +288,24 @@ CommunicationFunctions* create_socket_communication_functions(const char *addres
 /* --- Socket Server --- */
 
 void cb_start_server(CodeBuffer *parser_cb, const char *address, int port) {
-    int server_fd, new_socket;
+    SocketHandle server_fd, new_socket;
     struct sockaddr_in serv_addr;
     int opt = 1;
     int addrlen = sizeof(serv_addr);
 
-    if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0) {
+#ifdef _WIN32
+    if (ensure_winsock_initialized() != 0) {
+        exit(EXIT_FAILURE);
+    }
+#endif
+
+    server_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (server_fd == INVALID_SOCKET_HANDLE) {
         LOG("cb_start_server: socket failed");
         exit(EXIT_FAILURE);
     }
-    setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, (const char *)&opt, sizeof(opt));
+    memset(&serv_addr, 0, sizeof(serv_addr));
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_addr.s_addr = INADDR_ANY; 
     serv_addr.sin_port = htons(port);
@@ -256,7 +336,7 @@ void cb_start_server(CodeBuffer *parser_cb, const char *address, int port) {
                 send_msg(new_socket, resp);
                 free(resp);
                 free(req);
-                close(new_socket);
+                CLOSE_SOCKET(new_socket);
                 continue;
             } else if (req[0] == 'I') {
                 InitialLoad *load = cb_deserialize_initial_load(req + 2);
@@ -276,14 +356,13 @@ void cb_start_server(CodeBuffer *parser_cb, const char *address, int port) {
             if (stream) cb_free_token_stream(stream);
             free(req);
         }
-        close(new_socket);
+        CLOSE_SOCKET(new_socket);
     }
 }
 
 /* --- STDIN/STDOUT (Pipe) Client Comms --- */
 
-#include <sys/wait.h>
-
+#ifndef _WIN32
 typedef struct {
     int read_fd;
     int write_fd;
@@ -495,3 +574,19 @@ void cb_start_stdio_server(CodeBuffer *parser_cb) {
         free(req);
     }
 }
+#else
+CommunicationFunctions* create_stdio_communication_functions(const char *command) {
+    (void)command;
+    LOG("create_stdio_communication_functions: unsupported on Windows");
+    return NULL;
+}
+
+void free_stdio_communication_functions(CommunicationFunctions *comm) {
+    free(comm);
+}
+
+void cb_start_stdio_server(CodeBuffer *parser_cb) {
+    (void)parser_cb;
+    LOG("cb_start_stdio_server: unsupported on Windows");
+}
+#endif

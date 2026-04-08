@@ -12,6 +12,34 @@ endif()
 
 enable_testing()
 #set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=memory -fPIE -pie -fno-omit-frame-pointer -g -fno-optimize-sibling-calls -O1")
-add_subdirectory(toyeditor)
+
+set(BUILD_TOYEDITOR OFF)
+
+if(WIN32)
+  set(PDCURSESMOD_SOURCE_DIR
+      "${CMAKE_SOURCE_DIR}/third_party/PDCursesMod"
+      CACHE PATH
+      "Path to a vendored PDCursesMod checkout")
+
+  if(EXISTS "${PDCURSESMOD_SOURCE_DIR}/curses.h")
+    set(BUILD_TOYEDITOR ON)
+    message(STATUS "Building toyeditor with PDCursesMod from ${PDCURSESMOD_SOURCE_DIR}")
+  else()
+    message(STATUS "Skipping toyeditor: PDCursesMod not found at ${PDCURSESMOD_SOURCE_DIR}")
+  endif()
+else()
+  find_package(Curses QUIET)
+  if(Curses_FOUND)
+    set(BUILD_TOYEDITOR ON)
+    message(STATUS "Building toyeditor with curses library: ${CURSES_LIBRARIES}")
+  else()
+    message(STATUS "Skipping toyeditor: curses library not found")
+  endif()
+endif()
+
+if(BUILD_TOYEDITOR)
+  add_subdirectory(toyeditor)
+endif()
+
 add_subdirectory(toyparser)
 add_subdirectory(codebuffer)

@@ -159,7 +159,11 @@ typedef struct {
 
 
 /* Thread that loads the initial content */
+#ifdef _WIN32
+static DWORD WINAPI load_initial_content_thread(LPVOID arg) {
+#else
 static void* load_initial_content_thread(void *arg) {
+#endif
     InitialLoadThreadData *data = (InitialLoadThreadData *)arg;
     LOG("load_initial_content_thread: starting");
 
@@ -217,7 +221,11 @@ static void* load_initial_content_thread(void *arg) {
     free(arg);
     LOG("load_initial_content_thread: finished");
 
+#ifdef _WIN32
+    return 0;
+#else
     return NULL;
+#endif
 }
 
 /* Common helper function to do a deep copy of an InitialLoad */
@@ -352,7 +360,11 @@ typedef struct {
 
 
 /* Thread that processes deltas and parses result */
+#ifdef _WIN32
+static DWORD WINAPI process_delta_thread(LPVOID arg) {
+#else
 static void* process_delta_thread(void *arg) {
+#endif
     ProcessDeltaThreadData *data = (ProcessDeltaThreadData *)arg;
     LOG("process_delta_thread: starting");
 
@@ -413,7 +425,11 @@ static void* process_delta_thread(void *arg) {
     free(arg);
     LOG("process_delta_thread: finished");
 
+#ifdef _WIN32
+    return 0;
+#else
     return NULL;
+#endif
 }
 
 /*

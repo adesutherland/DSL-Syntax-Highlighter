@@ -1,12 +1,17 @@
 //
 // Created by Adrian Sutherland on 11/10/2024.
 //
+#ifdef _WIN32
+#include <curses.h>
+#else
 #include <ncurses.h>
+#endif
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 #include <ctype.h>
 #include <errno.h>
+#include <locale.h>
 #ifdef _WIN32
 #include <windows.h>
 typedef HANDLE ThreadType;
@@ -627,6 +632,8 @@ int main(int argc, char *argv[]) {
 
     TextBuffer buffer = {0, NULL, NULL};
     load_file(&buffer, filename);
+
+    setlocale(LC_ALL, "");
 
     initscr();
     raw();
