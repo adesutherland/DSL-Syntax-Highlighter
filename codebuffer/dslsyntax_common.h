@@ -145,6 +145,7 @@ typedef enum CB_NodeType {
     // General Tokens
     LEXER_TOKEN,               // Represents a generic token
     LEXER_UNKNOWN,             // Represents an unknown token (error)
+    LEXER_PREPROCESSOR,        // Represents preprocessor directives (#include, #define, import)
     // Comment Tokens
     LEXER_COMMENT,             // Represents a comment
     // Literal Tokens
@@ -168,6 +169,9 @@ typedef enum CB_NodeType {
     LEXER_RH_EXPR,             // Represents the right-hand side of an expression (e.g., `)`).
     // Identifier Tokens
     LEXER_IDENTIFIER,          // Represents user-defined names such as variable names, function names, etc. This token can include an optional unique_i attribute to help track identifiers within the correct scope.
+    LEXER_TYPE_IDENTIFIER,     // Represents types, classes, structs, etc.
+    LEXER_FUNCTION_IDENTIFIER, // Represents function/method names
+    LEXER_CONSTANT_IDENTIFIER, // Represents constants or macros
 
     // *** Parse Tree Control Tokens - non-leaf nodes in the parse tree ***
 
