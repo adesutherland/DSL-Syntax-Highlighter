@@ -13,7 +13,11 @@ void test_stdio_communication() {
      * We assume this test is run from the project root or the build directory.
      * For now, let's assume it's in the current directory or a known path.
      */
+#ifdef _WIN32
     const char *parser_cmd = "toyparser/tp.exe";
+#else
+    const char *parser_cmd = "toyparser/tp";
+#endif
 
     /* Create Client Communication */
     CommunicationFunctions *comm = create_stdio_communication_functions(parser_cmd);
