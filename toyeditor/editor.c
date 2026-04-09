@@ -349,7 +349,7 @@ void editor_refresh(TextBuffer *buffer, int cursor_x, int cursor_y) {
             int italic = highlight & ATTR_ITALIC;
             int dim = highlight & ATTR_DIM;
             if (!colour) colour = PAIR_BODY;
-            int attr = COLOR_PAIR(colour);
+            chtype attr = COLOR_PAIR(colour);
             if (underline) attr |= A_UNDERLINE;
             if (bold) attr |= A_BOLD;
             if (italic) attr |= A_ITALIC;
@@ -749,7 +749,7 @@ int main(int argc, char *argv[]) {
             }
             continue;
         }
-        if (c == KEY_BACKSPACE || c == 127) {
+        if (c == KEY_BACKSPACE || c == 127 || c == '\b') {
             if (cursor_x > 0) {
                 delete_char(&buffer, cursor_x, cursor_y);
                 cursor_x--;
@@ -762,7 +762,7 @@ int main(int argc, char *argv[]) {
             }
             continue;
         }
-        if (c == '\n') {
+        if (c == '\n' || c == '\r' || c == KEY_ENTER) {
             if (cursor_x == strlen(buffer.rows[cursor_y])) {
                 add_line(&buffer, cursor_y + 1); // Add a new line after the current line
             }
