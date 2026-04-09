@@ -54,9 +54,11 @@ dkms.conf
 /cmake-build-debug/
 /build/
 /cmake-build-release/
+/cmake-build-*
 
 editor.log
 parser.log
 
 /.idea/
 /third_party/PDCursesMod/
+/.junie/

@@ -1,4 +1,6 @@
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <assert.h>
 #include "dslsyntax_common.h"
 #include "dslsyntax_editor.h"

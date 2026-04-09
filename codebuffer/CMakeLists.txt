@@ -38,14 +38,16 @@ if(WIN32)
     target_link_libraries(dslsyntax_parser PUBLIC ws2_32)
 endif()
 
-if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
+if(PROJECT_IS_TOP_LEVEL OR BUILD_TESTING)
     # Test programs
-    add_executable(code_test test.c)
-    target_link_libraries(code_test dslsyntax_editor dslsyntax_parser)
-    target_link_libraries(code_test highlighter)
-    target_include_directories(code_test PRIVATE . ${DSL_Syntax_Highlighter_SOURCE_DIR}/toyparser)
+    if(TARGET highlighter)
+        add_executable(code_test EXCLUDE_FROM_ALL test.c)
+        target_link_libraries(code_test dslsyntax_editor dslsyntax_parser)
+        target_link_libraries(code_test highlighter)
+        target_include_directories(code_test PRIVATE . ${DSL_Syntax_Highlighter_SOURCE_DIR}/toyparser)
+    endif()
 
-    add_executable(token_test token_test.c)
+    add_executable(token_test EXCLUDE_FROM_ALL token_test.c)
     target_link_libraries(token_test dslsyntax_parser)
 
     add_executable(serialization_test serialization_test.c)
@@ -57,25 +59,22 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
     add_executable(ep_test ep_test.c)
     target_link_libraries(ep_test dslsyntax_editor)
 
-    add_executable(fake_editor fake_editor.c)
+    add_executable(fake_editor EXCLUDE_FROM_ALL fake_editor.c)
     target_link_libraries(fake_editor dslsyntax_editor)
 
-    add_executable(fake_parser fake_parser.c)
+    add_executable(fake_parser EXCLUDE_FROM_ALL fake_parser.c)
     target_link_libraries(fake_parser dslsyntax_parser)
 
-    if(NOT WIN32)
-        add_executable(socket_test socket_test.c)
+    add_executable(socket_test socket_test.c)
+    if(WIN32)
+        target_link_libraries(socket_test dslsyntax_parser ws2_32)
+    else()
         target_link_libraries(socket_test dslsyntax_parser pthread)
     endif()
 
     # --- Automated Testing ---
-    enable_testing()
-
     add_test(NAME serialization_test COMMAND serialization_test)
     add_test(NAME diff_test COMMAND diff_test)
     add_test(NAME ep_test COMMAND ep_test)
-
-    if(NOT WIN32)
-        add_test(NAME socket_test COMMAND socket_test)
-    endif()
+    add_test(NAME socket_test COMMAND socket_test)
 endif()

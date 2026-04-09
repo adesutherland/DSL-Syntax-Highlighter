@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.29)
-project(DSL_Syntax_Highlighter)
+project(DSL_Syntax_Highlighter LANGUAGES C)
 
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
   # Fallback to local user bin to avoid sudo permission errors during testing
@@ -10,7 +10,7 @@ if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
   endif()
 endif()
 
-enable_testing()
+include(CTest)
 #set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=memory -fPIE -pie -fno-omit-frame-pointer -g -fno-optimize-sibling-calls -O1")
 
 set(BUILD_TOYEDITOR OFF)

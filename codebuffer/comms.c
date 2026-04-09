@@ -153,6 +153,41 @@ typedef struct {
     int port;
 } SocketCommsData;
 
+static void socket_sleep_ms(int milliseconds) {
+#ifdef _WIN32
+    Sleep(milliseconds);
+#else
+    usleep(milliseconds * 1000);
+#endif
+}
+
+static SocketHandle connect_socket_with_retry(const char *address, int port) {
+    const int max_attempts = 20;
+
+    for (int attempt = 0; attempt < max_attempts; ++attempt) {
+        SocketHandle sock = socket(AF_INET, SOCK_STREAM, 0);
+        struct sockaddr_in serv_addr;
+
+        if (sock == INVALID_SOCKET_HANDLE) {
+            return INVALID_SOCKET_HANDLE;
+        }
+
+        memset(&serv_addr, 0, sizeof(serv_addr));
+        serv_addr.sin_family = AF_INET;
+        serv_addr.sin_port = htons(port);
+        inet_pton(AF_INET, address, &serv_addr.sin_addr);
+
+        if (connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) == 0) {
+            return sock;
+        }
+
+        CLOSE_SOCKET(sock);
+        socket_sleep_ms(50);
+    }
+
+    return INVALID_SOCKET_HANDLE;
+}
+
 static CB_ParseTree* socket_send_initial_load(CommunicationFunctions *comm_block, InitialLoad *initial_load) {
     SocketCommsData *sd = (SocketCommsData*)comm_block->comms_data;
     LOG("socket_send_initial_load: connecting to %s:%d", sd->address, sd->port);
@@ -161,18 +196,9 @@ static CB_ParseTree* socket_send_initial_load(CommunicationFunctions *comm_block
         return NULL;
     }
 #endif
-    SocketHandle sock = socket(AF_INET, SOCK_STREAM, 0);
-    struct sockaddr_in serv_addr;
-    memset(&serv_addr, 0, sizeof(serv_addr));
-    serv_addr.sin_family = AF_INET;
-    serv_addr.sin_port = htons(sd->port);
-    inet_pton(AF_INET, sd->address, &serv_addr.sin_addr);
-
-    if (sock == INVALID_SOCKET_HANDLE || connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
-        LOG("socket_send_initial_load: connect failed, errno=%d", errno);
-        if (sock != INVALID_SOCKET_HANDLE) {
-            CLOSE_SOCKET(sock);
-        }
+    SocketHandle sock = connect_socket_with_retry(sd->address, sd->port);
+    if (sock == INVALID_SOCKET_HANDLE) {
+        LOG("socket_send_initial_load: connect failed after retries, errno=%d", errno);
         return NULL;
     }
 
@@ -201,17 +227,8 @@ static CB_ParseTree* socket_send_delta(CommunicationFunctions *comm_block, Delta
         return NULL;
     }
 #endif
-    SocketHandle sock = socket(AF_INET, SOCK_STREAM, 0);
-    struct sockaddr_in serv_addr;
-    memset(&serv_addr, 0, sizeof(serv_addr));
-    serv_addr.sin_family = AF_INET;
-    serv_addr.sin_port = htons(sd->port);
-    inet_pton(AF_INET, sd->address, &serv_addr.sin_addr);
-
-    if (sock == INVALID_SOCKET_HANDLE || connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
-        if (sock != INVALID_SOCKET_HANDLE) {
-            CLOSE_SOCKET(sock);
-        }
+    SocketHandle sock = connect_socket_with_retry(sd->address, sd->port);
+    if (sock == INVALID_SOCKET_HANDLE) {
         return NULL;
     }
 
@@ -236,7 +253,6 @@ static CB_ParseTree* socket_send_delta(CommunicationFunctions *comm_block, Delta
 static void socket_request_ep_config(CommunicationFunctions *comm_block) {
     SocketCommsData *sd = (SocketCommsData*)comm_block->comms_data;
     SocketHandle sock = INVALID_SOCKET_HANDLE;
-    struct sockaddr_in serv_addr;
 
 #ifdef _WIN32
     if (ensure_winsock_initialized() != 0) {
@@ -244,20 +260,9 @@ static void socket_request_ep_config(CommunicationFunctions *comm_block) {
     }
 #endif
 
-    sock = socket(AF_INET, SOCK_STREAM, 0);
+    sock = connect_socket_with_retry(sd->address, sd->port);
     if (sock == INVALID_SOCKET_HANDLE) {
-        LOG("socket_request_ep_config: socket creation error");
-        return;
-    }
-
-    memset(&serv_addr, 0, sizeof(serv_addr));
-    serv_addr.sin_family = AF_INET;
-    serv_addr.sin_port = htons(sd->port);
-    inet_pton(AF_INET, sd->address, &serv_addr.sin_addr);
-
-    if (connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
-        LOG("socket_request_ep_config: connect failed, errno=%d", errno);
-        CLOSE_SOCKET(sock);
+        LOG("socket_request_ep_config: connect failed after retries, errno=%d", errno);
         return;
     }
 
@@ -575,18 +580,220 @@ void cb_start_stdio_server(CodeBuffer *parser_cb) {
     }
 }
 #else
+/* Windows STDIN/STDOUT Implementation */
+typedef struct {
+    HANDLE read_handle;
+    HANDLE write_handle;
+    HANDLE process_handle;
+} WinStdioCommsData;
+
+static int win_write_all(HANDLE h, const char *buf, size_t len) {
+    DWORD total = 0;
+    while (total < len) {
+        DWORD n = 0;
+        if (!WriteFile(h, buf + total, (DWORD)(len - total), &n, NULL) || n == 0) {
+            return -1;
+        }
+        total += n;
+    }
+    return 0;
+}
+
+static int win_read_all(HANDLE h, char *buf, size_t len) {
+    DWORD total = 0;
+    while (total < len) {
+        DWORD n = 0;
+        if (!ReadFile(h, buf + total, (DWORD)(len - total), &n, NULL) || n == 0) {
+            return -1;
+        }
+        total += n;
+    }
+    return 0;
+}
+
+static int win_stdio_send_msg(HANDLE h, const char *msg) {
+    uint32_t len = strlen(msg);
+    char len_hex[9];
+    sprintf(len_hex, "%08x", len);
+    if (win_write_all(h, len_hex, 8) < 0) return -1;
+    return win_write_all(h, msg, len);
+}
+
+static char* win_stdio_receive_msg(HANDLE h) {
+    char len_hex[9];
+    if (win_read_all(h, len_hex, 8) < 0) return NULL;
+    len_hex[8] = '\0';
+    uint32_t len;
+    if (sscanf(len_hex, "%x", &len) != 1) return NULL;
+    char *buf = (char*)malloc(len + 1);
+    if (win_read_all(h, buf, len) < 0) {
+        free(buf);
+        return NULL;
+    }
+    buf[len] = '\0';
+    return buf;
+}
+
+static CB_ParseTree* win_stdio_send_initial_load(CommunicationFunctions *comm_block, InitialLoad *initial_load) {
+    WinStdioCommsData *sd = (WinStdioCommsData*)comm_block->comms_data;
+    char *payload = cb_serialize_initial_load(initial_load);
+    char *full_req = (char*)malloc(strlen(payload) + 10);
+    sprintf(full_req, "I|%s", payload);
+    win_stdio_send_msg(sd->write_handle, full_req);
+    free(payload);
+    free(full_req);
+
+    char *resp = win_stdio_receive_msg(sd->read_handle);
+    if (!resp) return NULL;
+
+    CB_TokenStream *stream = cb_deserialize_token_stream(resp);
+    free(resp);
+    CB_ParseTree *tb = cb_reconstruct_tree(stream);
+    if (stream) cb_free_token_stream(stream);
+    return tb;
+}
+
+static CB_ParseTree* win_stdio_send_delta(CommunicationFunctions *comm_block, Delta *delta) {
+    WinStdioCommsData *sd = (WinStdioCommsData*)comm_block->comms_data;
+    char *payload = cb_serialize_delta(delta);
+    char *full_req = (char*)malloc(strlen(payload) + 10);
+    sprintf(full_req, "D|%s", payload);
+    win_stdio_send_msg(sd->write_handle, full_req);
+    free(payload);
+    free(full_req);
+
+    char *resp = win_stdio_receive_msg(sd->read_handle);
+    if (!resp) return NULL;
+
+    CB_TokenStream *stream = cb_deserialize_token_stream(resp);
+    free(resp);
+    CB_ParseTree *tb = cb_reconstruct_tree(stream);
+    if (stream) cb_free_token_stream(stream);
+    return tb;
+}
+
+static void win_stdio_request_ep_config(CommunicationFunctions *comm_block) {
+    WinStdioCommsData *sd = (WinStdioCommsData*)comm_block->comms_data;
+    win_stdio_send_msg(sd->write_handle, "C|EP");
+    char *resp = win_stdio_receive_msg(sd->read_handle);
+    if (resp && resp[0] == 'C' && resp[1] == '|') {
+        cb_load_ep_config_from_string(resp + 2);
+    }
+    if (resp) free(resp);
+}
+
 CommunicationFunctions* create_stdio_communication_functions(const char *command) {
-    (void)command;
-    LOG("create_stdio_communication_functions: unsupported on Windows");
-    return NULL;
+    HANDLE hChildStdinRd, hChildStdinWr, hChildStdoutRd, hChildStdoutWr;
+    SECURITY_ATTRIBUTES saAttr;
+
+    saAttr.nLength = sizeof(SECURITY_ATTRIBUTES);
+    saAttr.bInheritHandle = TRUE;
+    saAttr.lpSecurityDescriptor = NULL;
+
+    if (!CreatePipe(&hChildStdoutRd, &hChildStdoutWr, &saAttr, 0)) {
+        LOG("StdoutRd CreatePipe failed");
+        return NULL;
+    }
+    if (!SetHandleInformation(hChildStdoutRd, HANDLE_FLAG_INHERIT, 0)) {
+        LOG("Stdout SetHandleInformation failed");
+        return NULL;
+    }
+    if (!CreatePipe(&hChildStdinRd, &hChildStdinWr, &saAttr, 0)) {
+        LOG("Stdin CreatePipe failed");
+        return NULL;
+    }
+    if (!SetHandleInformation(hChildStdinWr, HANDLE_FLAG_INHERIT, 0)) {
+        LOG("Stdin SetHandleInformation failed");
+        return NULL;
+    }
+
+    PROCESS_INFORMATION piProcInfo;
+    STARTUPINFO siStartInfo;
+    ZeroMemory(&piProcInfo, sizeof(PROCESS_INFORMATION));
+    ZeroMemory(&siStartInfo, sizeof(STARTUPINFO));
+    siStartInfo.cb = sizeof(STARTUPINFO);
+    siStartInfo.hStdError = hChildStdoutWr;
+    siStartInfo.hStdOutput = hChildStdoutWr;
+    siStartInfo.hStdInput = hChildStdinRd;
+    siStartInfo.dwFlags |= STARTF_USESTDHANDLES;
+
+    char *cmd_copy = strdup(command);
+    if (!CreateProcess(NULL, cmd_copy, NULL, NULL, TRUE, 0, NULL, NULL, &siStartInfo, &piProcInfo)) {
+        LOG("CreateProcess failed");
+        free(cmd_copy);
+        return NULL;
+    }
+    free(cmd_copy);
+
+    CloseHandle(hChildStdoutWr);
+    CloseHandle(hChildStdinRd);
+    CloseHandle(piProcInfo.hThread);
+
+    CommunicationFunctions *comm = (CommunicationFunctions*)malloc(sizeof(CommunicationFunctions));
+    comm->send_initial_load = win_stdio_send_initial_load;
+    comm->send_delta = win_stdio_send_delta;
+    comm->request_ep_config = win_stdio_request_ep_config;
+    WinStdioCommsData *sd = (WinStdioCommsData*)malloc(sizeof(WinStdioCommsData));
+    sd->read_handle = hChildStdoutRd;
+    sd->write_handle = hChildStdinWr;
+    sd->process_handle = piProcInfo.hProcess;
+    comm->comms_data = sd;
+
+    comm->request_ep_config(comm);
+    return comm;
 }
 
 void free_stdio_communication_functions(CommunicationFunctions *comm) {
+    if (comm == NULL) return;
+    WinStdioCommsData *sd = (WinStdioCommsData*)comm->comms_data;
+    if (sd) {
+        CloseHandle(sd->read_handle);
+        CloseHandle(sd->write_handle);
+        TerminateProcess(sd->process_handle, 0);
+        CloseHandle(sd->process_handle);
+        free(sd);
+    }
     free(comm);
 }
 
 void cb_start_stdio_server(CodeBuffer *parser_cb) {
-    (void)parser_cb;
-    LOG("cb_start_stdio_server: unsupported on Windows");
+    LOG("Parser stdio server starting");
+    HANDLE hStdin = GetStdHandle(STD_INPUT_HANDLE);
+    HANDLE hStdout = GetStdHandle(STD_OUTPUT_HANDLE);
+
+    while (1) {
+        char *req = win_stdio_receive_msg(hStdin);
+        if (!req) {
+            LOG("cb_start_stdio_server: receive_msg failed or EOF");
+            break;
+        }
+
+        if (req[0] == 'C') {
+            const char *config = cb_get_ep_config_string();
+            if (!config) config = "";
+            char *resp = malloc(strlen(config) + 10);
+            sprintf(resp, "C|%s", config);
+            win_stdio_send_msg(hStdout, resp);
+            free(resp);
+            free(req);
+            continue;
+        } else if (req[0] == 'I') {
+            InitialLoad *load = cb_deserialize_initial_load(req + 2);
+            base_load_initial_content(parser_cb, load);
+        } else if (req[0] == 'D') {
+            Delta *delta = cb_deserialize_delta(req + 2);
+            base_replay_delta(parser_cb, delta);
+            base_parse_buffer(parser_cb);
+            free_delta(delta);
+        }
+
+        CB_TokenStream *stream = cb_flatten_tree(parser_cb->parse_tree);
+        char *resp = cb_serialize_token_stream(stream);
+        win_stdio_send_msg(hStdout, resp);
+
+        free(resp);
+        if (stream) cb_free_token_stream(stream);
+        free(req);
+    }
 }
 #endif
