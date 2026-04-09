@@ -781,7 +781,7 @@ int main(int argc, char *argv[]) {
         // Mouse Events
         if (c == KEY_MOUSE) {
             MEVENT event;
-            if (nc_getmouse(&event) == OK) {
+            if (getmouse(&event) == OK) {
                 if (event.bstate & BUTTON1_CLICKED) {
                     // Left click
                     cursor_x = event.x - scroll_col; // Adjust for scroll
