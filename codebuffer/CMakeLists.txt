@@ -72,9 +72,13 @@ if(PROJECT_IS_TOP_LEVEL OR BUILD_TESTING)
         target_link_libraries(socket_test dslsyntax_parser pthread)
     endif()
 
+    add_executable(stdio_test stdio_test.c)
+    target_link_libraries(stdio_test dslsyntax_editor)
+
     # --- Automated Testing ---
     add_test(NAME serialization_test COMMAND serialization_test)
     add_test(NAME diff_test COMMAND diff_test)
     add_test(NAME ep_test COMMAND ep_test)
     add_test(NAME socket_test COMMAND socket_test)
+    add_test(NAME stdio_test COMMAND stdio_test)
 endif()

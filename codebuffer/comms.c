@@ -719,7 +719,9 @@ CommunicationFunctions* create_stdio_communication_functions(const char *command
 
     char *cmd_copy = strdup(command);
     if (!CreateProcess(NULL, cmd_copy, NULL, NULL, TRUE, 0, NULL, NULL, &siStartInfo, &piProcInfo)) {
-        LOG("CreateProcess failed");
+        char err_buf[256];
+        sprintf(err_buf, "CreateProcess failed with error: %lu", GetLastError());
+        LOG(err_buf);
         free(cmd_copy);
         return NULL;
     }

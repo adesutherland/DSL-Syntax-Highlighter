@@ -40,6 +40,8 @@ if(WIN32)
       PDC_WIDE
       PDC_FORCE_UTF8)
 
+  target_link_libraries(pdcursesmod_wincon PUBLIC winmm)
+
   target_link_libraries(te PRIVATE pdcursesmod_wincon)
 else()
   find_package(Curses REQUIRED)

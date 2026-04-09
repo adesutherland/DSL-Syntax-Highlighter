@@ -56,7 +56,7 @@ typedef DWORD (WINAPI *ThreadFunctionType)(LPVOID lpThreadParameter);
 // Severity levels
 #define SEVERITY_INFO 0
 #define SEVERITY_WARNING 1
-#define SEVERITY_ERROR 2
+#define SEVERITY_ERR 2
 
 typedef struct TextBuffer {
     int num_rows;
@@ -575,7 +575,11 @@ void add_line(TextBuffer *buffer, int y) {
 }
 int main(int argc, char *argv[]) {
     char *filename = NULL;
+#ifdef _WIN32
+    char *parser_path = "toyparser/tp.exe"; // Default
+#else
     char *parser_path = "../toyparser/tp"; // Default
+#endif
     char *parser_args = ""; // Default
     int debug = 0;
     int use_socket = 0;
@@ -777,7 +781,7 @@ int main(int argc, char *argv[]) {
         // Mouse Events
         if (c == KEY_MOUSE) {
             MEVENT event;
-            if (getmouse(&event) == OK) {
+            if (nc_getmouse(&event) == OK) {
                 if (event.bstate & BUTTON1_CLICKED) {
                     // Left click
                     cursor_x = event.x - scroll_col; // Adjust for scroll

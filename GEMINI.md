@@ -18,27 +18,45 @@ The **DSL Syntax Highlighter (DSLSH)** is a C library providing a platform for s
 ## Common Operations
 ### Build the Project
 ```bash
-mkdir -p cmake-build-debug && cd cmake-build-debug && cmake .. && cmake --build .
+cmake -B cmake-build-debug
+cmake --build cmake-build-debug
 ```
 
 ### Run Tests
 ```bash
+cd cmake-build-debug
 ctest
 ```
 
-### Run Client/Server
+### Run Client/Server (from project root)
+**Linux / macOS:**
 ```bash
 # Default (STDIO mode - Editor launches Parser automatically)
-./toyeditor/te toyeditor/test.toy
+./cmake-build-debug/toyeditor/te toyeditor/test.toy
 
 # Specify Parser location and args (e.g. slow mode)
-./toyeditor/te --parser ./toyparser/tp --parser-args "-s" toyeditor/test.toy
+./cmake-build-debug/toyeditor/te --parser ./cmake-build-debug/toyparser/tp --parser-args "-s" toyeditor/test.toy
 
 # Socket mode
 # Terminal 1
-./toyparser/tp -d 8080
+./cmake-build-debug/toyparser/tp -d 8080
 # Terminal 2
-./toyeditor/te --socket --port 8080 toyeditor/test.toy
+./cmake-build-debug/toyeditor/te --socket --port 8080 toyeditor/test.toy
+```
+
+**Windows (PowerShell):**
+```powershell
+# Default (STDIO mode - Editor launches Parser automatically)
+.\cmake-build-debug\toyeditor\te.exe toyeditor\test.toy
+
+# Specify Parser location and args (e.g. slow mode)
+.\cmake-build-debug\toyeditor\te.exe --parser .\cmake-build-debug\toyparser\tp.exe --parser-args "-s" toyeditor\test.toy
+
+# Socket mode
+# Terminal 1
+.\cmake-build-debug\toyparser\tp.exe -d 8080
+# Terminal 2
+.\cmake-build-debug\toyeditor\te.exe --socket --port 8080 toyeditor\test.toy
 ```
 
 ## Maintenance Rules

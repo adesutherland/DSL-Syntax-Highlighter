@@ -10,7 +10,7 @@ int main(int argc, char *argv[]) {
     int port = 0;
     int debug = 0;
 #ifdef _WIN32
-    int stdio_mode = 0; /* Windows build uses socket mode by default. */
+    int stdio_mode = 1; /* Default to stdio */
     port = 8080;
 #else
     int stdio_mode = 1; /* Default to stdio */
@@ -20,12 +20,7 @@ int main(int argc, char *argv[]) {
         if (strcmp(argv[i], "-d") == 0) debug = 1;
         else if (strcmp(argv[i], "-s") == 0) slow_mode = 1;
         else if (strcmp(argv[i], "--stdio") == 0) {
-#ifdef _WIN32
-            fprintf(stderr, "--stdio is not supported on Windows builds.\n");
-            return 1;
-#else
             stdio_mode = 1;
-#endif
         }
         else {
             port = atoi(argv[i]);
