@@ -781,7 +781,11 @@ int main(int argc, char *argv[]) {
         // Mouse Events
         if (c == KEY_MOUSE) {
             MEVENT event;
+#ifdef PDCURSES
+            if (nc_getmouse(&event) == OK) {
+#else
             if (getmouse(&event) == OK) {
+#endif
                 if (event.bstate & BUTTON1_CLICKED) {
                     // Left click
                     cursor_x = event.x - scroll_col; // Adjust for scroll
