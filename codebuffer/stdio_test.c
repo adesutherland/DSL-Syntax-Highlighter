@@ -2,6 +2,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#ifdef _WIN32
+#include <io.h>
+#define ACCESS _access
+#define X_OK 0
+#else
+#include <unistd.h>
+#define ACCESS access
+#endif
 #include "dslsyntax_common.h"
 #include "serialization.h"
 
@@ -11,13 +19,37 @@ void test_stdio_communication() {
     /* 
      * In the build environment, toyparser/tp.exe should be accessible.
      * We assume this test is run from the project root or the build directory.
-     * For now, let's assume it's in the current directory or a known path.
+     * Try to locate the parser executable.
      */
 #ifdef _WIN32
-    const char *parser_cmd = "toyparser/tp.exe";
+    const char *candidates[] = {
+        "toyparser/tp.exe",
+        "cmake-build-debug/toyparser/tp.exe",
+        "../toyparser/tp.exe",
+        "../../toyparser/tp.exe"
+    };
 #else
-    const char *parser_cmd = "toyparser/tp";
+    const char *candidates[] = {
+        "toyparser/tp",
+        "cmake-build-debug/toyparser/tp",
+        "../toyparser/tp",
+        "../../toyparser/tp"
+    };
 #endif
+    
+    const char *parser_cmd = NULL;
+    for (int i = 0; i < sizeof(candidates) / sizeof(candidates[0]); i++) {
+        if (ACCESS(candidates[i], X_OK) == 0) {
+            parser_cmd = candidates[i];
+            break;
+        }
+    }
+
+    if (parser_cmd == NULL) {
+        fprintf(stderr, "Failed to find parser executable (tp). Checked common locations.\n");
+        return;
+    }
+    printf("Using parser executable: %s\n", parser_cmd);
 
     /* Create Client Communication */
     CommunicationFunctions *comm = create_stdio_communication_functions(parser_cmd);
