@@ -298,6 +298,14 @@ typedef struct EP_Rules {
     char *ident_extra_chars; // Extra characters allowed in identifiers (e.g. "$", "-", etc.)
 } EP_Rules;
 
+/* State of the out-of-process parser */
+typedef enum {
+    CB_PARSER_NOT_LOADED = 0,
+    CB_PARSER_ACTIVE,
+    CB_PARSER_CRASHED,
+    CB_PARSER_SUSPENDED
+} CB_ParserState;
+
 /* Structure of the main shared code buffer, synced between editor and parser */
 typedef struct CodeBuffer {
     // Header
@@ -326,6 +334,11 @@ typedef struct CodeBuffer {
     // Communication Functions - injected by the editor or parser
     CommunicationFunctions *communication_functions;
     ParserFunction parser_function;  // Function to parse the code buffer
+
+    // Out-of-process parser state
+    CB_ParserState parser_state;
+    int crash_count;
+    int auto_relaunch;               // Boolean: auto relaunch on crash (default: true)
 } CodeBuffer;
 
 /* Messages sent between the parser and editor */
@@ -376,6 +389,7 @@ struct CommunicationFunctions {
     SendDelta send_delta;
     RequestEPConfig request_ep_config;
     void* comms_data; // Pointer to data for the communication functions
+    char* command;    // Saved command for auto-relaunch
 };
 
 /* Library sync functions - these are called by the communication functions */
@@ -457,6 +471,10 @@ char32_t* utf8_to_utf32(const char *utf8, size_t *length);
 
 /* Function to create a new CodeBuffer */
 CodeBuffer* create_code_buffer(CommunicationFunctions *comm, ParserFunction parser_function);
+
+/* Parser State Management */
+CB_ParserState cb_get_parser_state(CodeBuffer *cb);
+void cb_set_auto_relaunch(CodeBuffer *cb, int enabled);
 
 /* Applying Transactions */
 void editor_apply_transaction(CodeBuffer *cb, Transaction transaction);

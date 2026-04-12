@@ -43,3 +43,6 @@ endif()
 
 add_subdirectory(toyparser)
 add_subdirectory(codebuffer)
+add_subdirectory(tools)
+
+install(FILES docs/PARSER_TESTER.md DESTINATION share/doc/dslsyntax)

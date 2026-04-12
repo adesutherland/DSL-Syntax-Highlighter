@@ -157,6 +157,56 @@ typedef struct {
     InitialLoad *initial_load;
 } InitialLoadThreadData;
 
+/* Helper to restart parser if crashed */
+static void handle_parser_crash(CodeBuffer *cb) {
+    if (!cb) return;
+
+    if (cb->parser_state == CB_PARSER_SUSPENDED) return;
+
+    cb->crash_count++;
+    LOG("handle_parser_crash: parser crashed. count=%d", cb->crash_count);
+
+    if (cb->auto_relaunch && cb->crash_count < 3) {
+        LOG("handle_parser_crash: attempting to relaunch parser...");
+        CommunicationFunctions *old_comm = cb->communication_functions;
+        if (old_comm && old_comm->command) {
+            char *cmd_copy = strdup(old_comm->command);
+            free_stdio_communication_functions(old_comm);
+            
+            CommunicationFunctions *new_comm = create_stdio_communication_functions(cmd_copy);
+            free(cmd_copy);
+            if (new_comm) {
+                cb->communication_functions = new_comm;
+                char *full_text = get_code_buffer_source(cb);
+                InitialLoad *sync_load = create_initial_load(cb->unique_document_id ? cb->unique_document_id : "resync", full_text ? full_text : "");
+                if (full_text) free(full_text);
+
+                CB_ParseTree *new_result = new_comm->send_initial_load(new_comm, sync_load);
+                
+                if (new_result) {
+                    if (cb->parse_tree) {
+                        cb_clear_node_pointers(cb);
+                        cb_free_token_buffer(cb->parse_tree);
+                    }
+                    cb->parse_tree = new_result;
+                    cb->parser_state = CB_PARSER_ACTIVE;
+                    LOG("handle_parser_crash: relaunch successful");
+                } else {
+                    cb->parser_state = CB_PARSER_CRASHED;
+                    LOG("handle_parser_crash: relaunch failed immediately");
+                }
+                free_initial_load(sync_load);
+            } else {
+                cb->parser_state = CB_PARSER_CRASHED;
+            }
+        } else {
+            cb->parser_state = CB_PARSER_CRASHED;
+        }
+    } else {
+        cb->parser_state = CB_PARSER_SUSPENDED;
+        LOG("handle_parser_crash: parser suspended due to crash limit or auto_relaunch=0");
+    }
+}
 
 /* Thread that loads the initial content */
 #ifdef _WIN32
@@ -178,12 +228,20 @@ static void* load_initial_content_thread(void *arg) {
         exit(EXIT_FAILURE);
     }
 
+    if (result == NULL) {
+        handle_parser_crash(data->code_buffer);
+        result = data->code_buffer->parse_tree;
+    } else {
+        data->code_buffer->parser_state = CB_PARSER_ACTIVE;
+        data->code_buffer->crash_count = 0;
+    }
+
     /* Set the parse tree in the code buffer */
-    if (data->code_buffer->parse_tree) {
+    if (data->code_buffer->parse_tree && data->code_buffer->parse_tree != result) {
         cb_clear_node_pointers(data->code_buffer);
         cb_free_token_buffer(data->code_buffer->parse_tree);
     }
-    data->code_buffer->parse_tree = result;
+    if (result) data->code_buffer->parse_tree = result;
 
     if (data->code_buffer->transaction_count > 0) {
         copy_snapshot_to_codebuffer(data->code_buffer);
@@ -385,12 +443,20 @@ static void* process_delta_thread(void *arg) {
         data->delta = NULL;
     }
 
+    if (result == NULL) {
+        handle_parser_crash(data->code_buffer);
+        result = data->code_buffer->parse_tree;
+    } else {
+        data->code_buffer->parser_state = CB_PARSER_ACTIVE;
+        data->code_buffer->crash_count = 0;
+    }
+
     /* Set the parse tree in the code buffer */
-    if (data->code_buffer->parse_tree) {
+    if (data->code_buffer->parse_tree && data->code_buffer->parse_tree != result) {
         cb_clear_node_pointers(data->code_buffer);
         cb_free_token_buffer(data->code_buffer->parse_tree);
     }
-    data->code_buffer->parse_tree = result;
+    if (result) data->code_buffer->parse_tree = result;
 
     if (data->code_buffer->transaction_count > 0) {
         copy_snapshot_to_codebuffer(data->code_buffer);

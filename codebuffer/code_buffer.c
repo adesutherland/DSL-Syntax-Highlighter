@@ -383,11 +383,28 @@ CodeBuffer* create_code_buffer(CommunicationFunctions *comm, ParserFunction pars
     cb->parse_tree = NULL;
     cb->highest_severity = CB_NONE;
     cb->ep_rules = NULL;
+
+    // Out-of-process parser state initialization
+    cb->parser_state = CB_PARSER_NOT_LOADED;
+    cb->crash_count = 0;
+    cb->auto_relaunch = 1;
+
     cb->transactions = NULL;
     cb->transaction_count = 0;
     cb->change_version = 0;
 
     return cb;
+}
+
+CB_ParserState cb_get_parser_state(CodeBuffer *cb) {
+    if (!cb) return CB_PARSER_NOT_LOADED;
+    return cb->parser_state;
+}
+
+void cb_set_auto_relaunch(CodeBuffer *cb, int enabled) {
+    if (cb) {
+        cb->auto_relaunch = enabled;
+    }
 }
 
 /* Editor Functions */

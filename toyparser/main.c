@@ -22,6 +22,9 @@ int main(int argc, char *argv[]) {
         else if (strcmp(argv[i], "--stdio") == 0) {
             stdio_mode = 1;
         }
+        else if (strcmp(argv[i], "--parser") == 0) {
+            // Ignore, compatibility with rxas
+        }
         else {
             port = atoi(argv[i]);
             stdio_mode = 0; /* If port provided, use socket */

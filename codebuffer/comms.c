@@ -62,6 +62,8 @@ CommunicationFunctions* create_inproc_communication_functions(CodeBuffer *parser
     CommunicationFunctions *comm = (CommunicationFunctions *)malloc(sizeof(CommunicationFunctions));
     comm->send_initial_load = inproc_send_initial_load;
     comm->send_delta = inproc_send_delta;
+    comm->request_ep_config = NULL;
+    comm->command = NULL;
     InprocCommsData *comms_data = (InprocCommsData *)malloc(sizeof(InprocCommsData));
     comms_data->comm = comm;
     comms_data->parser_code_buffer = parser_cb;
@@ -281,6 +283,7 @@ CommunicationFunctions* create_socket_communication_functions(const char *addres
     comm->send_initial_load = socket_send_initial_load;
     comm->send_delta = socket_send_delta;
     comm->request_ep_config = socket_request_ep_config;
+    comm->command = NULL;
     SocketCommsData *sd = (SocketCommsData*)malloc(sizeof(SocketCommsData));
     sd->address = strdup(address);
     sd->port = port;
@@ -517,6 +520,7 @@ CommunicationFunctions* create_stdio_communication_functions(const char *command
         comm->send_initial_load = stdio_send_initial_load;
         comm->send_delta = stdio_send_delta;
         comm->request_ep_config = stdio_request_ep_config;
+        comm->command = command ? strdup(command) : NULL;
         StdioCommsData *sd = (StdioCommsData*)malloc(sizeof(StdioCommsData));
         sd->read_fd = pipe_out[0];
         sd->write_fd = pipe_in[1];
@@ -538,6 +542,7 @@ void free_stdio_communication_functions(CommunicationFunctions *comm) {
         waitpid(sd->pid, NULL, 0);
         free(sd);
     }
+    if (comm->command) free(comm->command);
     free(comm);
 }
 
@@ -735,6 +740,7 @@ CommunicationFunctions* create_stdio_communication_functions(const char *command
     comm->send_initial_load = win_stdio_send_initial_load;
     comm->send_delta = win_stdio_send_delta;
     comm->request_ep_config = win_stdio_request_ep_config;
+    comm->command = command ? strdup(command) : NULL;
     WinStdioCommsData *sd = (WinStdioCommsData*)malloc(sizeof(WinStdioCommsData));
     sd->read_handle = hChildStdoutRd;
     sd->write_handle = hChildStdinWr;
@@ -755,6 +761,7 @@ void free_stdio_communication_functions(CommunicationFunctions *comm) {
         CloseHandle(sd->process_handle);
         free(sd);
     }
+    if (comm->command) free(comm->command);
     free(comm);
 }
 
