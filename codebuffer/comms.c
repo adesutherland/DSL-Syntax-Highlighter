@@ -474,6 +474,17 @@ static void stdio_request_ep_config(CommunicationFunctions *comm_block) {
     if (resp) free(resp);
 }
 
+static void stdio_kill_connection(CommunicationFunctions *comm_block) {
+    if (!comm_block || !comm_block->comms_data) return;
+    StdioCommsData *sd = (StdioCommsData*)comm_block->comms_data;
+    if (sd->pid > 0) {
+        kill(sd->pid, SIGKILL);
+        sd->pid = -1;
+    }
+    if (sd->read_fd >= 0) { close(sd->read_fd); sd->read_fd = -1; }
+    if (sd->write_fd >= 0) { close(sd->write_fd); sd->write_fd = -1; }
+}
+
 CommunicationFunctions* create_stdio_communication_functions(const char *command) {
     int pipe_in[2];  /* Editor -> Parser */
     int pipe_out[2]; /* Parser -> Editor */
@@ -520,6 +531,7 @@ CommunicationFunctions* create_stdio_communication_functions(const char *command
         comm->send_initial_load = stdio_send_initial_load;
         comm->send_delta = stdio_send_delta;
         comm->request_ep_config = stdio_request_ep_config;
+        comm->kill_connection = stdio_kill_connection;
         comm->command = command ? strdup(command) : NULL;
         StdioCommsData *sd = (StdioCommsData*)malloc(sizeof(StdioCommsData));
         sd->read_fd = pipe_out[0];
@@ -687,6 +699,18 @@ static void win_stdio_request_ep_config(CommunicationFunctions *comm_block) {
     if (resp) free(resp);
 }
 
+static void win_stdio_kill_connection(CommunicationFunctions *comm_block) {
+    if (!comm_block || !comm_block->comms_data) return;
+    WinStdioCommsData *sd = (WinStdioCommsData*)comm_block->comms_data;
+    if (sd->process_handle) {
+        TerminateProcess(sd->process_handle, 1);
+        CloseHandle(sd->process_handle);
+        sd->process_handle = NULL;
+    }
+    if (sd->read_handle) { CloseHandle(sd->read_handle); sd->read_handle = NULL; }
+    if (sd->write_handle) { CloseHandle(sd->write_handle); sd->write_handle = NULL; }
+}
+
 CommunicationFunctions* create_stdio_communication_functions(const char *command) {
     HANDLE hChildStdinRd, hChildStdinWr, hChildStdoutRd, hChildStdoutWr;
     SECURITY_ATTRIBUTES saAttr;
@@ -740,6 +764,7 @@ CommunicationFunctions* create_stdio_communication_functions(const char *command
     comm->send_initial_load = win_stdio_send_initial_load;
     comm->send_delta = win_stdio_send_delta;
     comm->request_ep_config = win_stdio_request_ep_config;
+    comm->kill_connection = win_stdio_kill_connection;
     comm->command = command ? strdup(command) : NULL;
     WinStdioCommsData *sd = (WinStdioCommsData*)malloc(sizeof(WinStdioCommsData));
     sd->read_handle = hChildStdoutRd;

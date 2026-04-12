@@ -19,6 +19,13 @@ void editor_init() {
     LOG("editor_init: finished");
 }
 
+/* Function to forcefully kill the parser process */
+void cb_kill_parser_process(CodeBuffer *cb) {
+    if (!cb || !cb->communication_functions || !cb->communication_functions->kill_connection) return;
+    LOG("cb_kill_parser_process: forceful termination requested");
+    cb->communication_functions->kill_connection(cb->communication_functions);
+}
+
 /* Function to free the editor side of the library */
 void editor_free() {
     if (editor_is_parsing_thread_active()) {

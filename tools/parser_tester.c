@@ -32,12 +32,13 @@ static void print_tree(CB_Node *node, int depth) {
 
 #include <time.h>
 
-static int wait_for_parser() {
+static int wait_for_parser(CodeBuffer *cb) {
     time_t start_time = time(NULL);
     printf("Waiting for parser...\n");
     while (editor_is_parsing_thread_active()) {
         if (time(NULL) - start_time > 10) {
-            printf("Error: Parser timed out after 10 seconds\n");
+            printf("Error: Parser timed out after 10 seconds. Killing process...\n");
+            cb_kill_parser_process(cb);
             return 0; // Timeout
         }
 #ifdef _WIN32
@@ -75,14 +76,32 @@ int main(int argc, char **argv) {
         if (strcmp(tok, "QUIT") == 0) {
             break;
         } else if (strcmp(tok, "INIT") == 0) {
-            char *parser_cmd = strtok(NULL, " ");
-            char *source_file = strtok(NULL, " ");
-            
+            char *parser_cmd = NULL;
+            char *source_file = NULL;
+
+            // Check if the next character is a quote
+            char *next_token_start = cmd_buf + (tok - cmd_buf) + strlen(tok) + 1;
+            while (*next_token_start == ' ') next_token_start++;
+
+            if (*next_token_start == '"') {
+                parser_cmd = next_token_start + 1;
+                char *quote_end = strchr(parser_cmd, '"');
+                if (quote_end) {
+                    *quote_end = '\0';
+                    source_file = strtok(quote_end + 1, " \n\r");
+                }
+            } else {
+                parser_cmd = strtok(NULL, " \n\r");
+                source_file = strtok(NULL, " \n\r");
+            }
+
             if (!parser_cmd || !source_file) {
-                printf("Error: INIT requires <parser_cmd> and <source_file>\n");
+                printf("Error: INIT requires <parser_cmd> and <source_file>. Use quotes if parser_cmd has spaces.\n");
                 continue;
             }
-            
+
+            printf("INIT command: %s\n", parser_cmd);
+            printf("INIT source : %s\n", source_file);            
             if (cb) {
                 // Free old
                 free_code_buffer(cb);
@@ -120,7 +139,7 @@ int main(int argc, char **argv) {
             free(content);
             
             load_initial_content(cb, load);
-            if (wait_for_parser()) {
+            if (wait_for_parser(cb)) {
                 printf("OK: Initialized\n");
             }
             
@@ -148,7 +167,7 @@ int main(int argc, char **argv) {
             exit_codeblock_critical_section();
             
             process_delta(cb);
-            if (wait_for_parser()) {
+            if (wait_for_parser(cb)) {
                 printf("OK: Inserted\n");
             }
             
@@ -176,7 +195,7 @@ int main(int argc, char **argv) {
             exit_codeblock_critical_section();
             
             process_delta(cb);
-            if (wait_for_parser()) {
+            if (wait_for_parser(cb)) {
                 printf("OK: Deleted\n");
             }
             

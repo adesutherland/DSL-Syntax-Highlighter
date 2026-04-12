@@ -383,11 +383,15 @@ typedef CB_ParseTree* (*SendDelta)(CommunicationFunctions *comm_block, Delta *de
 /* Function to request EP config from the parser */
 typedef void (*RequestEPConfig)(CommunicationFunctions *comm_block);
 
+/* Function to kill the underlying connection/process (optional) */
+typedef void (*KillConnection)(CommunicationFunctions *comm_block);
+
 /* Communication Function Pointer Structure */
 struct CommunicationFunctions {
     SendInitialLoad send_initial_load;
     SendDelta send_delta;
     RequestEPConfig request_ep_config;
+    KillConnection kill_connection;
     void* comms_data; // Pointer to data for the communication functions
     char* command;    // Saved command for auto-relaunch
 };

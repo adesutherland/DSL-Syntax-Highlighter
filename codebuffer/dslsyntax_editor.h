@@ -13,8 +13,11 @@
 /* Function to initialise the editor side of the library */
 void editor_init();
 
-/* Function to free the editor side of the library */
+/* Function to gracefully free the editor side of the library */
 void editor_free();
+
+/* Function to forcefully terminate the parser connection / child process */
+void cb_kill_parser_process(CodeBuffer *cb);
 
 /* Function to create an initial load from a source string */
 InitialLoad* create_initial_load(const char *unique_document_id, const char *content);

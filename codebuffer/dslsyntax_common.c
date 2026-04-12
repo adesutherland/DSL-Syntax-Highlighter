@@ -498,6 +498,7 @@ static void cb_add_missing_tokens_node(CB_Node *node, __attribute__((unused)) si
             CodeBufferCharacter *value = get_code_buffer_part(data->cb, pos, gap, NULL, NULL, NULL);
             /* call the callback to get the missing token */
             CB_Node missing = data->callback(data->user_data, pos, gap, value);
+            if (missing.length == 0) missing.length = 1;
             /* Set the pos */
             missing.pos = pos;
             /* Add the missing token */
@@ -506,13 +507,14 @@ static void cb_add_missing_tokens_node(CB_Node *node, __attribute__((unused)) si
 
             /* Loop closing the gap */
             pos = missing.pos + missing.length;
-            gap = first_pos - pos;
 
-            while (gap > 0) {
+            while (pos < first_pos) {
+                gap = first_pos - pos;
                 /* Get the text for the gap */
                 value = get_code_buffer_part(data->cb, pos, gap, NULL, NULL, NULL);
                 /* call the callback to get the missing token */
                 missing = data->callback(data->user_data, pos, gap, value);
+                if (missing.length == 0) missing.length = 1;
                 /* Set the pos */
                 missing.pos = pos;
                 /* Add the missing token */
@@ -520,7 +522,6 @@ static void cb_add_missing_tokens_node(CB_Node *node, __attribute__((unused)) si
                 cb_add_sibling_node(data->tb, missing);
                 /* Calculate the remaining gap */
                 pos = missing.pos + missing.length;
-                gap = first_pos - pos;
             }
 
             node->pos = 0;
@@ -529,23 +530,32 @@ static void cb_add_missing_tokens_node(CB_Node *node, __attribute__((unused)) si
 
         // Now check the code after the last node
         size_t last_pos = node->pos + node->length;
-        size_t last_gap = get_code_buffer_length(data->cb) - last_pos;
-        while (last_gap > 0) {
-            /* There is a gap */
-            /* Get the text for the gap */
-            CodeBufferCharacter *value = get_code_buffer_part(data->cb, last_pos, last_gap, NULL, NULL, NULL);
-            /* call the callback to get the missing token */
-            CB_Node missing = data->callback(data->user_data, last_pos, last_gap, value);
-            /* Set the pos */
-            missing.pos = last_pos;
-            /* Add the missing token */
-            cb_set_current_parent_to_node(data->tb, node);
-            cb_add_child_node(data->tb, missing);
+        if (last_pos < get_code_buffer_length(data->cb)) {
+            size_t last_gap = get_code_buffer_length(data->cb) - last_pos;
+            while (last_gap > 0) {
+                /* There is a gap */
+                /* Get the text for the gap */
+                CodeBufferCharacter *value = get_code_buffer_part(data->cb, last_pos, last_gap, NULL, NULL, NULL);
+                /* call the callback to get the missing token */
+                CB_Node missing = data->callback(data->user_data, last_pos, last_gap, value);
+                
+                // Protect against 0 length tokens causing an infinite loop
+                if (missing.length == 0) {
+                    missing.length = 1;
+                }
 
-            // Calculate the remaining gap
-            last_pos = missing.pos + missing.length;
-            last_gap -= missing.length;
-            node->length += missing.length;
+                /* Set the pos */
+                missing.pos = last_pos;
+                /* Add the missing token */
+                cb_set_current_parent_to_node(data->tb, node);
+                cb_add_child_node(data->tb, missing);
+
+                // Calculate the remaining gap
+                last_pos = missing.pos + missing.length;
+                if (last_pos >= get_code_buffer_length(data->cb)) break;
+                last_gap = get_code_buffer_length(data->cb) - last_pos;
+                node->length += missing.length;
+            }
         }
 
         return;
@@ -559,13 +569,14 @@ static void cb_add_missing_tokens_node(CB_Node *node, __attribute__((unused)) si
     else {
         /* Normal case - fill in the gap between the current node and the sibling */
         size_t pos = node->pos + node->length;
-        size_t gap = node->sibling->pos - pos;
-        if (gap > 0) {
+        if (node->sibling->pos > pos) {
+            size_t gap = node->sibling->pos - pos;
             /* There is a gap */
             /* Get the text for the gap */
             CodeBufferCharacter *value = get_code_buffer_part(data->cb, pos, gap, NULL, NULL, NULL);
             /* call the callback to get the missing token */
             CB_Node missing = data->callback(data->user_data, pos, gap, value);
+            if (missing.length == 0) missing.length = 1;
             /* Set the pos */
             missing.pos = pos;
             /* Add the missing token */
