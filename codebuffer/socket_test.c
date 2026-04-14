@@ -76,14 +76,10 @@ static int find_available_port(void) {
     return port;
 }
 
-#ifdef _WIN32
-DWORD WINAPI server_thread_func(LPVOID arg) {
-#else
-void* server_thread_func(void* arg) {
-#endif
+static void* server_thread_func(void* arg) {
     SocketTestServerArgs *server_args = (SocketTestServerArgs*)arg;
     cb_start_server(server_args->cb, "127.0.0.1", server_args->port);
-    return 0;
+    return NULL;
 }
 
 void test_socket_communication() {

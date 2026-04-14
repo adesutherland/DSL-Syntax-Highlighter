@@ -5,7 +5,10 @@
 #ifdef _WIN32
 #include <io.h>
 #define ACCESS _access
-#define X_OK 0
+/* MinGW/MSVC usually define X_OK in <io.h>. Guard to avoid redefinition warnings. */
+#ifndef X_OK
+#define X_OK 1 /* execute permission */
+#endif
 #else
 #include <unistd.h>
 #define ACCESS access
