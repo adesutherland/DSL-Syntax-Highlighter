@@ -3,6 +3,35 @@
 #include <string.h> /* For memset, though not strictly C90 but widely available */
 #include <errno.h>  /* For POSIX error numbers with pthreads */
 
+/* Platform headers are private to this implementation */
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
+#include <pthread.h>
+#include <unistd.h>
+#include <stdlib.h>
+#endif
+
+/* Private event type; not exposed in the public header */
+#ifdef _WIN32
+typedef struct {
+    HANDLE event_handle;      /* Windows Event Object handle */
+    int initialized;          /* 0/1 */
+} EventType;
+#else
+typedef struct {
+    pthread_mutex_t event_mutex; /* Protects cond var and flag */
+    pthread_cond_t cond_var;     /* Condition variable */
+    int is_set;                  /* 0/1 flag */
+    int initialized;             /* 0/1 */
+} EventType;
+#endif
 
 /* Global mutex and information, static to limit scope to this file */
 static MutexType codeblock_mutex;
@@ -15,7 +44,7 @@ static int parsing_thread_active; // 0 if no parsing thread is active, 1 if a th
 
 // Structure for thread launching arguments
 typedef struct {
-    ThreadFunctionType user_routine;
+    ParserThreadFunc user_routine;
     void *user_arg;
 } ThreadWrapperArgs;
 
@@ -44,14 +73,31 @@ int init_parser_thread_utils(void) {
     pthread_mutexattr_init(&attr);
     pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
 
-    if (pthread_mutex_init(&codeblock_mutex, &attr) != 0) {
-        perror("Failed to initialize global mutex");
+    codeblock_mutex = malloc(sizeof(pthread_mutex_t));
+    if (!codeblock_mutex) {
+        perror("Failed to allocate global mutex");
         pthread_mutexattr_destroy(&attr);
         return -1;
     }
-    if (pthread_mutex_init(&parser_active_mutex, &attr) != 0) {
+    if (pthread_mutex_init((pthread_mutex_t*)codeblock_mutex, &attr) != 0) {
+        perror("Failed to initialize global mutex");
+        free(codeblock_mutex);
+        pthread_mutexattr_destroy(&attr);
+        return -1;
+    }
+    parser_active_mutex = malloc(sizeof(pthread_mutex_t));
+    if (!parser_active_mutex) {
+        perror("Failed to allocate parser active mutex");
+        pthread_mutex_destroy((pthread_mutex_t*)codeblock_mutex); /* Clean up mutex */
+        free(codeblock_mutex);
+        pthread_mutexattr_destroy(&attr);
+        return -1;
+    }
+    if (pthread_mutex_init((pthread_mutex_t*)parser_active_mutex, &attr) != 0) {
         perror("Failed to initialize parser active mutex");
-        pthread_mutex_destroy(&codeblock_mutex); /* Clean up mutex */
+        pthread_mutex_destroy((pthread_mutex_t*)codeblock_mutex); /* Clean up mutex */
+        free(codeblock_mutex);
+        free(parser_active_mutex);
         pthread_mutexattr_destroy(&attr);
         return -1;
     }
@@ -102,8 +148,16 @@ void destroy_thread_utils(void) {
         if (codeblock_mutex != NULL) CloseHandle(codeblock_mutex);
         if (parser_active_mutex != NULL) CloseHandle(parser_active_mutex);
 #else /* POSIX */
-        pthread_mutex_destroy(&codeblock_mutex);
-        pthread_mutex_destroy(&parser_active_mutex);
+        if (codeblock_mutex) {
+            pthread_mutex_destroy((pthread_mutex_t*)codeblock_mutex);
+            free(codeblock_mutex);
+            codeblock_mutex = 0;
+        }
+        if (parser_active_mutex) {
+            pthread_mutex_destroy((pthread_mutex_t*)parser_active_mutex);
+            free(parser_active_mutex);
+            parser_active_mutex = 0;
+        }
 #endif
         parser_thread_initialized = 0;
     }
@@ -144,7 +198,7 @@ int enter_codeblock_critical_section(void) {
         return -1;
     }
 #else /* POSIX */
-    if (pthread_mutex_lock(&codeblock_mutex) != 0) {
+    if (pthread_mutex_lock((pthread_mutex_t*)codeblock_mutex) != 0) {
         perror("Failed to lock global mutex");
         return -1;
     }
@@ -166,7 +220,7 @@ int exit_codeblock_critical_section(void) {
         return -1; /* Indicate failure */
     }
 #else /* POSIX */
-    if (pthread_mutex_unlock(&codeblock_mutex) != 0) {
+    if (pthread_mutex_unlock((pthread_mutex_t*)codeblock_mutex) != 0) {
         perror("Failed to unlock global mutex");
         return -1; /* Indicate failure */
     }
@@ -190,7 +244,7 @@ static int enter_parse_active_critical_section(void) {
         return -1;
     }
 #else /* POSIX */
-    if (pthread_mutex_lock(&parser_active_mutex) != 0) {
+    if (pthread_mutex_lock((pthread_mutex_t*)parser_active_mutex) != 0) {
         perror("Failed to lock global mutex");
         return -1;
     }
@@ -210,7 +264,7 @@ static int exit_parse_active_critical_section(void) {
         return -1; /* Indicate failure */
     }
 #else /* POSIX */
-    if (pthread_mutex_unlock(&parser_active_mutex) != 0) {
+    if (pthread_mutex_unlock((pthread_mutex_t*)parser_active_mutex) != 0) {
         perror("Failed to unlock global mutex");
         return -1; /* Indicate failure */
     }
@@ -243,12 +297,12 @@ static DWORD WINAPI parser_thread_wrapper(LPVOID arg_wrapper_pv) {
 static void* parser_thread_wrapper(void *arg_wrapper_pv) {
 #endif
     ThreadWrapperArgs *wrapper_args = (ThreadWrapperArgs *)arg_wrapper_pv;
-    ThreadFunctionType user_routine = wrapper_args->user_routine;
+    ParserThreadFunc user_routine = wrapper_args->user_routine;
     void *user_arg = wrapper_args->user_arg;
     free(wrapper_args); // Free the dynamically allocated wrapper arguments
 
 #ifdef _WIN32
-    DWORD result = user_routine(user_arg); // Call the user's actual thread function
+    DWORD result = (DWORD)(uintptr_t)user_routine(user_arg); // Call the user's actual thread function
 #else
     void* result = user_routine(user_arg); // Call the user's actual thread function
 #endif
@@ -275,7 +329,7 @@ static void* parser_thread_wrapper(void *arg_wrapper_pv) {
 /*
  * Launches a new thread.
  */
-int launch_parser_thread(ThreadFunctionType start_routine, void *arg) {
+int launch_parser_thread(ParserThreadFunc start_routine, void *arg) {
 
     if (start_routine == NULL) {
         fprintf(stderr, "Error: start_routine for thread cannot be NULL.\n");
@@ -319,12 +373,21 @@ int launch_parser_thread(ThreadFunctionType start_routine, void *arg) {
         return -1;
     }
 #else /* POSIX */
-    if (pthread_create(&thread_id, NULL, parser_thread_wrapper, wrapper_args) != 0) {
+    pthread_t *pt = (pthread_t*)malloc(sizeof(pthread_t));
+    if (!pt) {
+        perror("Failed to allocate pthread_t");
+        free(wrapper_args);
+        exit_parse_active_critical_section();
+        return -1;
+    }
+    if (pthread_create(pt, NULL, parser_thread_wrapper, wrapper_args) != 0) {
         perror("Failed to create thread");
+        free(pt);
         free(wrapper_args); // Clean up allocated memory
         exit_parse_active_critical_section(); /* Release mutex */
         return -1;
     }
+    thread_id = (ThreadType)pt;
 #endif
 
     parsing_thread_active = 1; // Set the flag indicating a thread is now active
@@ -355,10 +418,16 @@ int join_parser_thread() {
     }
     CloseHandle(thread_id);
 #else /* POSIX */
-    if (pthread_join(thread_id, NULL) != 0) {
+    if (!thread_id) {
+        return 0;
+    }
+    pthread_t pt = *(pthread_t*)thread_id;
+    if (pthread_join(pt, NULL) != 0) {
         perror("Failed to join thread");
         return -1;
     }
+    free(thread_id);
+    thread_id = 0;
 #endif
     return 0;
 }
