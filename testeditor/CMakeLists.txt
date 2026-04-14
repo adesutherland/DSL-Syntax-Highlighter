@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.29)
-project(toyeditor C)
+project(testeditor C)
 
 set(CMAKE_C_STANDARD 11)
 

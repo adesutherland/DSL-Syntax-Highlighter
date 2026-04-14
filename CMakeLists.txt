@@ -38,7 +38,7 @@ else()
 endif()
 
 if(BUILD_TOYEDITOR)
-  add_subdirectory(toyeditor)
+  add_subdirectory(testeditor)
 endif()
 
 add_subdirectory(toyparser)

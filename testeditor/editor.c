@@ -31,7 +31,7 @@ typedef DWORD (WINAPI *ThreadFunctionType)(LPVOID lpThreadParameter);
 #define CTRL_KEY(k) ((k) & 0x1f)
 #define MAX_LINES 1000
 #define MAX_LINE_LENGTH 1024
-#define FOOTER_TEXT " Toy Editor  -  Ctrl-Q to quit  -  Ctrl-S to save"
+#define FOOTER_TEXT " Test Editor  -  Ctrl-Q to quit  -  Ctrl-S to save"
 #define HEADER_TEXT " File: %s"
 
 // Colour pairs
@@ -253,22 +253,20 @@ void load_file(TextBuffer *buffer, const char *filename) {
         buffer->rows = malloc(sizeof(char*));
         buffer->rows[0] = malloc(1);
         buffer->rows[0][0] = '\0';
-        return;
+    } else {
+        char line[MAX_LINE_LENGTH];
+        buffer->num_rows = 0;
+        buffer->rows = NULL;
+
+        while (fgets(line, sizeof(line), fp)) {
+            buffer->rows = realloc(buffer->rows, sizeof(char*) * (buffer->num_rows + 1));
+            line[strcspn(line, "\n")] = '\0';  // Remove newline character
+            buffer->rows[buffer->num_rows] = strdup(line);
+
+            buffer->num_rows++;
+        }
+        fclose(fp);
     }
-
-    char line[MAX_LINE_LENGTH];
-    buffer->num_rows = 0;
-    buffer->rows = NULL;
-
-    while (fgets(line, sizeof(line), fp)) {
-        buffer->rows = realloc(buffer->rows, sizeof(char*) * (buffer->num_rows + 1));
-        line[strcspn(line, "\n")] = '\0';  // Remove newline character
-        buffer->rows[buffer->num_rows] = strdup(line);
-
-        buffer->num_rows++;
-    }
-
-    fclose(fp);
 
     strcpy(loaded_filename, filename);
 
@@ -397,6 +395,20 @@ void editor_refresh(TextBuffer *buffer, int cursor_x, int cursor_y) {
         addch(' ');
     }
     mvprintw(max_y - 1, 0, "%s  ", FOOTER_TEXT);
+
+    // Display Parser Status
+    if (buffer->code_buffer) {
+        CB_ParserState state = cb_get_parser_state(buffer->code_buffer);
+        const char* status_str = "UNKNOWN";
+        switch (state) {
+            case CB_PARSER_NOT_LOADED: status_str = "NOT LOADED"; break;
+            case CB_PARSER_ACTIVE: status_str = "ACTIVE"; break;
+            case CB_PARSER_CRASHED: status_str = "CRASHED"; break;
+            case CB_PARSER_SUSPENDED: status_str = "SUSPENDED"; break;
+        }
+        mvprintw(max_y - 1, max_x - 25, "Parser: %s", status_str);
+    }
+
     if (message) {
         switch (severity) {
             case CB_ERROR:
@@ -408,26 +420,23 @@ void editor_refresh(TextBuffer *buffer, int cursor_x, int cursor_y) {
             default:
                 attron(COLOR_PAIR(PAIR_INFOMESSAGE));
         }
-        // Calculate the max message length om the screen
+        // Calculate the max message length on the screen
+        int message_start_col = 45;
+        int max_message_width = max_x - message_start_col - 26; // Leave space for status
+        if (max_message_width < 10) max_message_width = 10;
+
         int message_length = (int)strlen(message);
-        if (message_length > max_x - 2) {
-            message_length = max_x - 2; // Leave space for the brackets
+        if (message_length > max_message_width) {
+            message_length = max_message_width;
         }
-        // Print the message
+        
+        // Position the message explicitly
+        move(max_y - 1, message_start_col);
         addch('[');
         for (i = 0; i < message_length; i++) {
             addch(message[i]);
         }
         addch(']');
-        // How many characters are left on the line?
-        int remaining_length = max_x - 2 - message_length;
-        if (remaining_length) {
-            // Fill the rest of the line with spaces
-            attron(COLOR_PAIR(PAIR_FOOTER));
-            for (i = 0; i < remaining_length; i++) {
-                addch(' ');
-            }
-        }
     }
 
     // Cursor
@@ -573,14 +582,21 @@ void add_line(TextBuffer *buffer, int y) {
     txn.content = NULL; // No content for add line transaction
     editor_apply_transaction(cb, txn);
 }
+static void print_help(const char *prog) {
+    printf("Usage: %s [options] <parser_command> <filename>\n", prog);
+    printf("Options:\n");
+    printf("  -d            Enable debug logging (editor.log)\n");
+    printf("  --socket      Connect to parser via socket (127.0.0.1)\n");
+    printf("  --port <port> Socket port (default: 8080)\n");
+    printf("  -h, --help    Show this help\n\n");
+    printf("Example:\n");
+    printf("  %s \"./toyparser/tp -d\" test.toy\n", prog);
+    printf("  %s -d \"./bin/rxas --parser\" test.rxas\n", prog);
+}
+
 int main(int argc, char *argv[]) {
     char *filename = NULL;
-#ifdef _WIN32
-    char *parser_path = "toyparser/tp.exe"; // Default
-#else
-    char *parser_path = "../toyparser/tp"; // Default
-#endif
-    char *parser_args = ""; // Default
+    char *parser_cmd = NULL;
     int debug = 0;
     int use_socket = 0;
     int port = 8080;
@@ -592,35 +608,37 @@ int main(int argc, char *argv[]) {
             port = atoi(argv[++i]);
             use_socket = 1;
         }
-        else if (i + 1 < argc && (strcmp(argv[i], "--parser") == 0 || strcmp(argv[i], "-p") == 0)) {
-            parser_path = argv[++i];
+        else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
+            print_help(argv[0]);
+            return 0;
         }
-        else if (i + 1 < argc && (strcmp(argv[i], "--parser-args") == 0 || strcmp(argv[i], "-a") == 0)) {
-            parser_args = argv[++i];
-        }
-        else filename = argv[i];
+        else if (!parser_cmd) parser_cmd = argv[i];
+        else if (!filename) filename = argv[i];
     }
 
-    if (!filename) {
-        printf("Usage: %s [-d] [--socket] [--port 8080] [--parser ../toyparser/tp] [--parser-args \"args\"] filename\n", argv[0]);
+    if (!filename || !parser_cmd) {
+        print_help(argv[0]);
         exit(EXIT_FAILURE);
     }
 
     if (debug) cb_log_init("editor.log");
-    LOG("Toy Editor starting for file: %s", filename);
+    LOG("Test Editor starting for file: %s", filename);
 
     // Set up the SDL highlighter
     editor_init(); // Initialize the editor side of the library
 
-    if (use_socket) {        LOG("Connecting to parser via socket on port %d", port);
+    if (use_socket) {
+        LOG("Connecting to parser via socket on port %d", port);
         sdlhighlighter = create_socket_communication_functions("127.0.0.1", port);
     } else {
-        LOG("Launching parser via stdio: %s %s", parser_path, parser_args);
-        char cmd[2048];
-        /* Pass debug flag to parser if editor is in debug mode */
-        if (debug) sprintf(cmd, "%s -d %s", parser_path, parser_args);
-        else sprintf(cmd, "%s %s", parser_path, parser_args);
-        sdlhighlighter = create_stdio_communication_functions(cmd);
+        char final_parser_cmd[2048];
+        if (debug && strstr(parser_cmd, "-d") == NULL) {
+            snprintf(final_parser_cmd, sizeof(final_parser_cmd), "%s -d", parser_cmd);
+        } else {
+            strncpy(final_parser_cmd, parser_cmd, sizeof(final_parser_cmd));
+        }
+        LOG("Launching parser via stdio: %s", final_parser_cmd);
+        sdlhighlighter = create_stdio_communication_functions(final_parser_cmd);
     }
 
     if (!sdlhighlighter) {

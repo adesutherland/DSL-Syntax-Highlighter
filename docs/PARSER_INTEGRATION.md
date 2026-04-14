@@ -36,17 +36,71 @@ The library provides utilities to simplify tree construction:
 - `cb_add_missing_tokens(tb, cb, ...)`: Fills gaps in the tree with whitespace or comments.
 - `cb_tweak_tree_positions(tb)`: Heuristically moves terminators and brackets into their relevant subtrees.
 
-## 3. Running the Server
-Use the platform server loop to handle socket communication.
+## 4. Testing and Troubleshooting
 
-```c
-#include "dslsyntax_parser.h"
+Testing a background parser interactively in an editor is difficult. Use the automated tools provided.
 
-int main() {
-    // Create CodeBuffer with your parser
-    CodeBuffer *cb = create_code_buffer(NULL, my_language_parser);
+### Automated Testing with `parser_tester`
+The `parser_tester` tool allow you to simulate editor transactions and verify the AST without a GUI.
 
-    // Start the socket server (blocks)
-    cb_start_server(cb, "127.0.0.1", 8080);
-}
-```
+1. **Create a test script** (`test.txt`):
+   ```text
+   # Initialize the parser
+   INIT "./bin/my_parser --syntaxhighlight" test.src
+   
+   # Check initial AST
+   DUMP_AST
+   
+   # Test Emergency Parsing (Zero-latency feedback)
+   # INSERT_ASYNC sends the edit but DUMP_AST will show the heuristic tree 
+   # before the background parser finishes.
+   INSERT_ASYNC 0 0 // New content\n
+   DUMP_AST
+   
+   # Wait for background parser to finish and check final tree
+   SYNC
+   DUMP_AST
+   
+   QUIT
+   ```
+2. **Run the test**:
+   ```bash
+   parser_tester -q test.txt
+   ```
+3. **Use Golden Files**: Use the `-g` flag to compare the output against a known good baseline. This is essential for regression testing.
+   ```bash
+   parser_tester -q -g my_test.golden test.txt
+   ```
+
+### Best Practices for Token Mapping
+
+To ensure your parser looks good in all SDSLH-compatible editors (like THE and `te`), map your language-specific tokens to the middleware types consistently:
+
+| Middleware Type | Recommended Usage |
+| :--- | :--- |
+| `LEXER_KEYWORD` | Reserved words, built-in commands, opcodes. |
+| `LEXER_IDENTIFIER` | Variable names, label definitions, general symbols. |
+| `LEXER_FUNCTION_IDENTIFIER` | Function names, method calls, labels. |
+| `LEXER_CONSTANT_IDENTIFIER` | Constants, macros, registers. |
+| `LEXER_PREPROCESSOR` | Compiler directives (`import`, `include`, `.globals`). |
+| `LEXER_OPERATOR` | General operators (`:`, `?`). |
+| `LEXER_OPERATOR_ASSIGN` | Assignment (`=`). |
+| `LEXER_OPERATOR_ARITHMETIC`| Math (`+`, `-`, `*`, `/`). |
+| `LEXER_OPERATOR_LOGICAL` | Logic (`&&`, `\|\|`, `!`). |
+
+### Common Issues
+
+#### 1. Column Offset Mismatch
+If highlighting is shifted by one or two characters, your parser's column calculation likely differs from the `CodeBuffer`'s view.
+- **Rule**: `CodeBuffer` considers the character *after* a `\n` to be column 0 of the next line.
+- **Troubleshooting**: Check your lexer's newline handling. Ensure `linestart` is reset correctly to the cursor position *immediately after* the newline character(s) are consumed.
+
+#### 2. Protocol Corruption
+If the editor reports a crash immediately upon connection:
+- **Cause**: Your parser is likely printing debug messages to `stdout`.
+- **Fix**: In `stdio` mode, `stdout` is reserved for the hex-encoded SDSLH protocol. Use a dedicated log file or `stderr` for debugging. Use `cb_log_init("my_parser.log")` provided by the library.
+
+#### 3. Hanging / Infinite Loops
+If the editor freezes during a parse:
+- The library uses a 10-second watchdog in `parser_tester`. If it fails, the parser has a logic error in its tree traversal or lexing loop.
+- Ensure your `while` loops always advance the cursor, even on unknown characters.

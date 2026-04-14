@@ -903,6 +903,7 @@ const char* cb_token_type_to_string(CB_NodeType type) {
         case LEXER_EOF: return "LEXER_EOF";
         case LEXER_TOKEN: return "LEXER_TOKEN";
         case LEXER_UNKNOWN: return "LEXER_UNKNOWN";
+        case LEXER_PREPROCESSOR: return "LEXER_PREPROCESSOR";
         case LEXER_COMMENT: return "LEXER_COMMENT";
         case LEXER_STRING_LITERAL: return "LEXER_STRING_LITERAL";
         case LEXER_NUMBER_LITERAL: return "LEXER_NUMBER_LITERAL";
@@ -920,6 +921,9 @@ const char* cb_token_type_to_string(CB_NodeType type) {
         case LEXER_LH_EXPR: return "LEXER_LH_EXPR";
         case LEXER_RH_EXPR: return "LEXER_RH_EXPR";
         case LEXER_IDENTIFIER: return "LEXER_IDENTIFIER";
+        case LEXER_TYPE_IDENTIFIER: return "LEXER_TYPE_IDENTIFIER";
+        case LEXER_FUNCTION_IDENTIFIER: return "LEXER_FUNCTION_IDENTIFIER";
+        case LEXER_CONSTANT_IDENTIFIER: return "LEXER_CONSTANT_IDENTIFIER";
         case PARSE_TREE: return "PARSE_TREE";
         case PARSE_TREE_FILE: return "PARSE_TREE_FILE";
         case PARSE_TREE_CODEBLOCK: return "PARSE_TREE_CODEBLOCK";
