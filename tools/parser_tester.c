@@ -49,6 +49,65 @@ static void print_tree(CodeBuffer *cb, CB_Node *node, int depth, FILE *out) {
     }
 }
 
+static char *load_source_normalized(const char *filename) {
+    FILE *f;
+    char *raw = NULL;
+    char *content = NULL;
+    long file_size;
+    size_t bytes_read;
+    size_t in_index;
+    size_t out_index;
+
+    f = fopen(filename, "rb");
+    if (!f) return NULL;
+
+    if (fseek(f, 0, SEEK_END) != 0) {
+        fclose(f);
+        return NULL;
+    }
+
+    file_size = ftell(f);
+    if (file_size < 0) {
+        fclose(f);
+        return NULL;
+    }
+
+    if (fseek(f, 0, SEEK_SET) != 0) {
+        fclose(f);
+        return NULL;
+    }
+
+    raw = malloc((size_t)file_size + 1);
+    if (!raw) {
+        fclose(f);
+        return NULL;
+    }
+
+    bytes_read = fread(raw, 1, (size_t)file_size, f);
+    fclose(f);
+    raw[bytes_read] = '\0';
+
+    content = malloc(bytes_read + 1);
+    if (!content) {
+        free(raw);
+        return NULL;
+    }
+
+    out_index = 0;
+    for (in_index = 0; in_index < bytes_read; in_index++) {
+        if (raw[in_index] == '\r') {
+            content[out_index++] = '\n';
+            if ((in_index + 1) < bytes_read && raw[in_index + 1] == '\n') in_index++;
+        } else {
+            content[out_index++] = raw[in_index];
+        }
+    }
+    content[out_index] = '\0';
+
+    free(raw);
+    return content;
+}
+
 static int wait_for_parser(CodeBuffer *cb) {
     time_t start_time = time(NULL);
     if (g_verbose) printf("Waiting for parser...\n");
@@ -231,22 +290,13 @@ int main(int argc, char **argv) {
             
             cb = create_code_buffer(comm, NULL);
             cb_set_auto_relaunch(cb, 0); 
-            
-            FILE *f = fopen(source_file, "r");
-            if (!f) {
+
+            char *content = load_source_normalized(source_file);
+            if (!content) {
                 fprintf(stderr, "Failed to open %s\n", source_file);
                 continue;
             }
-            
-            fseek(f, 0, SEEK_END);
-            long fsize = ftell(f);
-            fseek(f, 0, SEEK_SET);
-            
-            char *content = malloc(fsize + 1);
-            fread(content, 1, fsize, f);
-            content[fsize] = '\0';
-            fclose(f);
-            
+
             InitialLoad *load = create_initial_load(source_file, content);
             free(content);
             
