@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#include <errno.h>
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -31,6 +32,8 @@ typedef struct {
     int port;
 } SocketTestServerArgs;
 
+#define SOCKET_TEST_SKIP_EXIT_CODE 77
+
 static int find_available_port(void) {
     int port = -1;
 #ifdef _WIN32
@@ -58,6 +61,9 @@ static int find_available_port(void) {
     }
 
     memset(&addr, 0, sizeof(addr));
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__)
+    addr.sin_len = sizeof(addr);
+#endif
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     addr.sin_port = 0;
@@ -82,25 +88,35 @@ static void* server_thread_func(void* arg) {
     return NULL;
 }
 
-void test_socket_communication() {
+static int skip_socket_test(const char *reason) {
+    fprintf(stderr, "Skipping socket communication test: %s\n", reason);
+    return SOCKET_TEST_SKIP_EXIT_CODE;
+}
+
+int test_socket_communication() {
     printf("Testing socket communication...\n");
 
     if (init_parser_thread_utils() != 0) {
         fprintf(stderr, "Failed to initialize thread utils.\n");
-        return;
+        return 1;
     }
 
     /* Create Parser CodeBuffer */
     CodeBuffer *parser_cb = create_code_buffer(NULL, NULL);
     int port = find_available_port();
-    assert(port > 0);
+    if (port <= 0) {
+        free_code_buffer(parser_cb);
+        destroy_thread_utils();
+        return skip_socket_test("localhost TCP bind is unavailable in this environment");
+    }
     SocketTestServerArgs server_args = { parser_cb, port };
     
     /* Start server in a thread */
     if (launch_parser_thread(server_thread_func, &server_args) != 0) {
         fprintf(stderr, "Failed to launch server thread.\n");
+        free_code_buffer(parser_cb);
         destroy_thread_utils();
-        return;
+        return 1;
     }
     
     /* Give server time to start */
@@ -111,7 +127,7 @@ void test_socket_communication() {
     if (comm == NULL) {
         fprintf(stderr, "Failed to create socket communication functions.\n");
         destroy_thread_utils();
-        return;
+        return 1;
     }
 
     /* 1. Test Initial Load */
@@ -125,11 +141,14 @@ void test_socket_communication() {
     utf8_to_line("Line 2", &load.lines[1]);
 
     CB_ParseTree *tb = comm->send_initial_load(comm, &load);
-    assert(tb != NULL);
     if (tb) {
         printf("Client: Initial Load Result received. Tree root type: %d\n", tb->root->type);
     } else {
         printf("Client: Initial Load failed.\n");
+        free(comm->comms_data);
+        free(comm);
+        destroy_thread_utils();
+        return 1;
     }
 
     /* 2. Test Delta */
@@ -146,12 +165,16 @@ void test_socket_communication() {
         delta.transactions[0].content = strdup(" Added");
 
         CB_ParseTree *tb2 = comm->send_delta(comm, &delta);
-        assert(tb2 != NULL);
         if (tb2) {
             printf("Client: Delta Result received.\n");
             cb_free_token_buffer(tb2);
         } else {
             printf("Client: Delta send failed.\n");
+            if (tb) cb_free_token_buffer(tb);
+            free(comm->comms_data);
+            free(comm);
+            destroy_thread_utils();
+            return 1;
         }
     }
 
@@ -163,9 +186,9 @@ void test_socket_communication() {
     printf("Socket communication test successful!\n");
     
     destroy_thread_utils(); // Clean up threading resources
+    return 0;
 }
 
 int main() {
-    test_socket_communication();
-    return 0;
+    return test_socket_communication();
 }
