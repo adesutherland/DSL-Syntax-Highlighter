@@ -23,7 +23,12 @@ Requests are prefixed with a type marker:
 - **`I|` (Initial Load)**: Sent when a document is first opened.
   - Format: `I|version|line_count|hex_doc_id|hex_full_content|`
 - **`D|` (Delta)**: Sent for incremental updates.
-  - Format: `D|version|transaction_count|type|line|col|count|hex_content|...`
+  - Version 2 format: `D|2|hex_doc_id|base_version|new_version|hex_overlay_id|transaction_count|type|line|col|count|hex_content|...`
+  - Legacy format: `D|version|transaction_count|type|line|col|count|hex_content|...`
+- **`H|` (Hypothesis Delta)**: Sent for non-committing parser feedback, such as code-completion previews.
+  - Format: `H|2|hex_doc_id|base_version|hypothesis_version|hex_overlay_id|transaction_count|type|line|col|count|hex_content|...`
+  - The parser applies the transactions to a scratch copy and returns a token stream without changing the committed document mirror.
+  - Editors should discard hypothesis responses whose `base_version` no longer matches the real buffer.
   - Transaction Types: `a` (Add Chars), `d` (Delete Chars), `L` (Add Line), `l` (Delete Line), `J` (Join Lines), `S` (Split Line).
 
 ### 2.2 Parser -> Editor (Response)
@@ -59,5 +64,10 @@ Tokens are used for both lexical highlighting and structural markers.
 ## 4. Interaction Flow
 1. **Initial Load**: Editor sends full file content. Parser returns the initial tree.
 2. **Edits**: Editor applies edit to local `CodeBuffer`, performs **Emergency Parsing** (heuristic local shift), and sends a `Delta` to the parser.
-3. **Synchronization**: Parser applies `Delta` to its mirror `CodeBuffer`, re-parses, flattens the tree, and returns the new `Token Stream`.
+3. **Synchronization**: Parser applies `Delta` to the matching document mirror `CodeBuffer`, re-parses, flattens the tree, and returns the new `Token Stream`.
 4. **Integration**: Editor replaces its local `CB_ParseTree` with the new result and re-renders.
+
+For parsers that serve more than one document in a single process, `hex_doc_id`
+selects the document session. A parser must create or replace that session on
+`I|`, mutate only that session on `D|`, and leave all committed sessions
+unchanged on `H|`.

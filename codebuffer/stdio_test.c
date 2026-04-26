@@ -78,11 +78,45 @@ void test_stdio_communication() {
         printf("Client: Initial Load failed.\n");
     }
 
-    /* 2. Test Delta */
+    /* 2. Test non-committing hypothesis */
+    if (tb) {
+        printf("Client: Sending Hypothesis Delta...\n");
+        Delta hypothesis;
+        memset(&hypothesis, 0, sizeof(hypothesis));
+        hypothesis.unique_document_id = strdup("test_doc");
+        hypothesis.base_version = 1;
+        hypothesis.change_version = 2;
+        hypothesis.overlay_id = strdup("completion");
+        hypothesis.transaction_count = 1;
+        hypothesis.transactions = (Transaction*)malloc(sizeof(Transaction));
+        hypothesis.transactions[0].type = TRANSACTION_ADDCHARS;
+        hypothesis.transactions[0].pos_line = 0;
+        hypothesis.transactions[0].pos_col = 6;
+        hypothesis.transactions[0].count = 0;
+        hypothesis.transactions[0].content = strdup(" XYZXYZ");
+
+        CB_ParseTree *hypothesis_tree = comm->send_hypothesis(comm, &hypothesis);
+        if (hypothesis_tree) {
+            printf("Client: Hypothesis Result received.\n");
+            cb_free_token_buffer(hypothesis_tree);
+        } else {
+            printf("Client: Hypothesis send failed.\n");
+        }
+        free(hypothesis.unique_document_id);
+        free(hypothesis.overlay_id);
+        free(hypothesis.transactions[0].content);
+        free(hypothesis.transactions);
+    }
+
+    /* 3. Test Delta. This must still apply from version 1, proving H did not commit. */
     if (tb) {
         printf("Client: Sending Delta...\n");
         Delta delta;
+        memset(&delta, 0, sizeof(delta));
+        delta.unique_document_id = strdup("test_doc");
+        delta.base_version = 1;
         delta.change_version = 2;
+        delta.overlay_id = NULL;
         delta.transaction_count = 1;
         delta.transactions = (Transaction*)malloc(sizeof(Transaction));
         delta.transactions[0].type = TRANSACTION_ADDCHARS;
@@ -92,8 +126,9 @@ void test_stdio_communication() {
         delta.transactions[0].content = strdup(" Added");
 
         CB_ParseTree *tb2 = comm->send_delta(comm, &delta);
+        free(delta.unique_document_id);
         if (tb2) {
-            printf("Client: Delta Result received.\n");
+            printf("Client: Delta Result received. Root length: %zu\n", tb2->root->length);
             cb_free_token_buffer(tb2);
         } else {
             printf("Client: Delta send failed.\n");

@@ -311,6 +311,8 @@ typedef struct CodeBuffer {
     // Header
     char *unique_document_id;
     size_t change_version;           // Version number of the document
+    int async_parse_active;           // Non-zero while this buffer has an outstanding parser request
+    int parse_complete_pending;       // Non-zero when this buffer has a parser result ready for the editor
 
     // Contents
     size_t line_count;               // The number of lines in the code buffer
@@ -353,7 +355,10 @@ typedef struct InitialLoad {
 
 /* Transactions applied by the editor to the code buffer since the last parse */
 typedef struct Delta {
+    char *unique_document_id;
+    size_t base_version;
     size_t change_version;
+    char *overlay_id;                 // Optional id for non-committing hypothesis requests
     Transaction *transactions;
     size_t transaction_count;
 } Delta;
@@ -380,6 +385,9 @@ typedef CB_ParseTree* (*SendInitialLoad)(CommunicationFunctions *comm_block, Ini
 /* Function to send a delta to the parser */
 typedef CB_ParseTree* (*SendDelta)(CommunicationFunctions *comm_block, Delta *delta);
 
+/* Function to send a non-committing hypothesis delta to the parser */
+typedef CB_ParseTree* (*SendHypothesis)(CommunicationFunctions *comm_block, Delta *delta);
+
 /* Function to request EP config from the parser */
 typedef void (*RequestEPConfig)(CommunicationFunctions *comm_block);
 
@@ -390,6 +398,7 @@ typedef void (*KillConnection)(CommunicationFunctions *comm_block);
 struct CommunicationFunctions {
     SendInitialLoad send_initial_load;
     SendDelta send_delta;
+    SendHypothesis send_hypothesis;
     RequestEPConfig request_ep_config;
     KillConnection kill_connection;
     void* comms_data; // Pointer to data for the communication functions
@@ -483,6 +492,9 @@ void cb_set_auto_relaunch(CodeBuffer *cb, int enabled);
 /* Applying Transactions */
 void editor_apply_transaction(CodeBuffer *cb, Transaction transaction);
 void cb_sync_line(CodeBuffer *cb, int line_index, const char *new_text);
+CB_ParseTree *request_hypothesis_parse(CodeBuffer *cb, Transaction *transactions, size_t transaction_count, const char *overlay_id);
+int cb_check_parse_complete_event(CodeBuffer *cb);
+int cb_reset_parse_complete_event(CodeBuffer *cb);
 
 /* Function to take a snapshot of the buffer */
 void snapshot(CodeBuffer *cb);

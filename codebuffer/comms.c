@@ -30,6 +30,211 @@ typedef int SocketHandle;
 #define INVALID_SOCKET_HANDLE (-1)
 #endif
 
+typedef struct ParserDocumentSession {
+    char *document_id;
+    CodeBuffer *code_buffer;
+    struct ParserDocumentSession *next;
+} ParserDocumentSession;
+
+static CodeBuffer *create_parser_code_buffer_like(CodeBuffer *template_cb) {
+    return create_code_buffer(NULL, template_cb ? template_cb->parser_function : NULL);
+}
+
+static ParserDocumentSession *find_parser_session(ParserDocumentSession *sessions, const char *document_id) {
+    while (sessions) {
+        if (sessions->document_id && document_id && strcmp(sessions->document_id, document_id) == 0) {
+            return sessions;
+        }
+        sessions = sessions->next;
+    }
+    return NULL;
+}
+
+static ParserDocumentSession *single_parser_session(ParserDocumentSession *sessions) {
+    if (!sessions || sessions->next) return NULL;
+    return sessions;
+}
+
+static ParserDocumentSession *replace_parser_session(ParserDocumentSession **sessions,
+                                                     CodeBuffer *template_cb,
+                                                     const char *document_id) {
+    ParserDocumentSession *session;
+
+    if (!sessions || !document_id) return NULL;
+    session = find_parser_session(*sessions, document_id);
+    if (!session) {
+        session = (ParserDocumentSession*)calloc(1, sizeof(ParserDocumentSession));
+        if (!session) return NULL;
+        session->document_id = strdup(document_id);
+        session->next = *sessions;
+        *sessions = session;
+    } else if (session->code_buffer) {
+        free_code_buffer(session->code_buffer);
+        session->code_buffer = NULL;
+    }
+    session->code_buffer = create_parser_code_buffer_like(template_cb);
+    return session;
+}
+
+static void free_parser_sessions(ParserDocumentSession *sessions) {
+    while (sessions) {
+        ParserDocumentSession *next = sessions->next;
+        if (sessions->document_id) free(sessions->document_id);
+        if (sessions->code_buffer) free_code_buffer(sessions->code_buffer);
+        free(sessions);
+        sessions = next;
+    }
+}
+
+static InitialLoad *create_initial_load_from_source(const char *document_id,
+                                                    const char *source,
+                                                    size_t change_version) {
+    InitialLoad *load;
+    size_t length;
+    size_t start;
+
+    load = (InitialLoad*)calloc(1, sizeof(InitialLoad));
+    if (!load) return NULL;
+    load->unique_document_id = strdup(document_id ? document_id : "hypothesis");
+    load->change_version = change_version;
+    if (!load->unique_document_id) {
+        free(load);
+        return NULL;
+    }
+
+    source = source ? source : "";
+    length = strlen(source);
+    start = 0;
+    for (size_t i = 0; i <= length; i++) {
+        if (source[i] == '\0' || source[i] == '\n') {
+            if (source[i] == '\0' && i == start && i > 0 && source[i - 1] == '\n') {
+                break;
+            }
+            size_t line_len = i - start;
+            char *line = (char*)malloc(line_len + 1);
+            CodeBufferLine *new_lines;
+            if (!line) {
+                free_initial_load(load);
+                return NULL;
+            }
+            memcpy(line, source + start, line_len);
+            line[line_len] = '\0';
+            new_lines = (CodeBufferLine*)safe_realloc(load->lines, (load->line_count + 1) * sizeof(CodeBufferLine));
+            if (!new_lines) {
+                free(line);
+                free_initial_load(load);
+                return NULL;
+            }
+            load->lines = new_lines;
+            utf8_to_line(line, &load->lines[load->line_count++]);
+            free(line);
+            start = i + 1;
+        }
+    }
+    return load;
+}
+
+static CB_ParseTree *parse_hypothesis_on_copy(CodeBuffer *source_cb, Delta *delta) {
+    CodeBuffer *scratch;
+    InitialLoad *load;
+    char *source;
+    CB_ParseTree *result;
+
+    if (!source_cb || !delta) return NULL;
+    if (delta->base_version != source_cb->change_version) {
+        LOG("Hypothesis version mismatch: document=%s base=%zu current=%zu",
+            source_cb->unique_document_id ? source_cb->unique_document_id : "",
+            delta->base_version,
+            source_cb->change_version);
+        return NULL;
+    }
+
+    source = get_code_buffer_source(source_cb);
+    if (!source) return NULL;
+
+    scratch = create_parser_code_buffer_like(source_cb);
+    if (!scratch) {
+        free(source);
+        return NULL;
+    }
+
+    load = create_initial_load_from_source(source_cb->unique_document_id ? source_cb->unique_document_id : "hypothesis",
+                                           source,
+                                           source_cb->change_version);
+    free(source);
+    if (!load) {
+        free_code_buffer(scratch);
+        return NULL;
+    }
+    base_load_initial_content(scratch, load);
+    base_replay_delta(scratch, delta);
+    base_parse_buffer(scratch);
+
+    result = scratch->parse_tree;
+    scratch->parse_tree = NULL;
+    free_code_buffer(scratch);
+    return result;
+}
+
+static CB_ParseTree *handle_parser_request(CodeBuffer *legacy_cb,
+                                           ParserDocumentSession **sessions,
+                                           char *req) {
+    CodeBuffer *target_cb;
+    ParserDocumentSession *session;
+    CB_ParseTree *hypothesis_result;
+
+    if (!legacy_cb || !req) return NULL;
+
+    if (req[0] == 'I') {
+        InitialLoad *load = cb_deserialize_initial_load(req + 2);
+        if (!load) return NULL;
+        if (load->unique_document_id) {
+            session = replace_parser_session(sessions, legacy_cb, load->unique_document_id);
+            if (!session || !session->code_buffer) {
+                free_initial_load(load);
+                return NULL;
+            }
+            base_load_initial_content(session->code_buffer, load);
+            return session->code_buffer->parse_tree;
+        }
+        base_load_initial_content(legacy_cb, load);
+        return legacy_cb->parse_tree;
+    }
+
+    if (req[0] == 'D' || req[0] == 'H') {
+        Delta *delta = cb_deserialize_delta(req + 2);
+        if (!delta) return NULL;
+        target_cb = legacy_cb;
+        if (delta->unique_document_id) {
+            session = find_parser_session(sessions ? *sessions : NULL, delta->unique_document_id);
+            if (!session || !session->code_buffer) {
+                LOG("No parser session for document %s", delta->unique_document_id);
+                free_delta(delta);
+                return NULL;
+            }
+            target_cb = session->code_buffer;
+        } else {
+            session = single_parser_session(sessions ? *sessions : NULL);
+            if (session && session->code_buffer) {
+                target_cb = session->code_buffer;
+            }
+        }
+
+        if (req[0] == 'H') {
+            hypothesis_result = parse_hypothesis_on_copy(target_cb, delta);
+            free_delta(delta);
+            return hypothesis_result;
+        }
+
+        base_replay_delta(target_cb, delta);
+        base_parse_buffer(target_cb);
+        free_delta(delta);
+        return target_cb->parse_tree;
+    }
+
+    return legacy_cb->parse_tree;
+}
+
 /* --- In-Process Comms --- */
 
 typedef struct {
@@ -58,11 +263,21 @@ static CB_ParseTree * inproc_send_delta(CommunicationFunctions *comm_block, Delt
     return result;
 }
 
+static CB_ParseTree * inproc_send_hypothesis(CommunicationFunctions *comm_block, Delta *delta) {
+    InprocCommsData *comms_data = (InprocCommsData *)comm_block->comms_data;
+    LOG("inproc_send_hypothesis: starting");
+    CB_ParseTree *result = parse_hypothesis_on_copy(comms_data->parser_code_buffer, delta);
+    LOG("inproc_send_hypothesis: finished");
+    return result;
+}
+
 CommunicationFunctions* create_inproc_communication_functions(CodeBuffer *parser_cb) {
     CommunicationFunctions *comm = (CommunicationFunctions *)malloc(sizeof(CommunicationFunctions));
     comm->send_initial_load = inproc_send_initial_load;
     comm->send_delta = inproc_send_delta;
+    comm->send_hypothesis = inproc_send_hypothesis;
     comm->request_ep_config = NULL;
+    comm->kill_connection = NULL;
     comm->command = NULL;
     InprocCommsData *comms_data = (InprocCommsData *)malloc(sizeof(InprocCommsData));
     comms_data->comm = comm;
@@ -252,6 +467,36 @@ static CB_ParseTree* socket_send_delta(CommunicationFunctions *comm_block, Delta
     return tb;
 }
 
+static CB_ParseTree* socket_send_hypothesis(CommunicationFunctions *comm_block, Delta *delta) {
+    SocketCommsData *sd = (SocketCommsData*)comm_block->comms_data;
+#ifdef _WIN32
+    if (ensure_winsock_initialized() != 0) {
+        return NULL;
+    }
+#endif
+    SocketHandle sock = connect_socket_with_retry(sd->address, sd->port);
+    if (sock == INVALID_SOCKET_HANDLE) {
+        return NULL;
+    }
+
+    char *payload = cb_serialize_delta(delta);
+    char *full_req = (char*)malloc(strlen(payload) + 10);
+    sprintf(full_req, "H|%s", payload);
+    send_msg(sock, full_req);
+    free(payload);
+    free(full_req);
+
+    char *resp = receive_msg(sock);
+    CLOSE_SOCKET(sock);
+    if (!resp) return NULL;
+
+    CB_TokenStream *stream = cb_deserialize_token_stream(resp);
+    free(resp);
+    CB_ParseTree *tb = cb_reconstruct_tree(stream);
+    if (stream) cb_free_token_stream(stream);
+    return tb;
+}
+
 static void socket_request_ep_config(CommunicationFunctions *comm_block) {
     SocketCommsData *sd = (SocketCommsData*)comm_block->comms_data;
     SocketHandle sock = INVALID_SOCKET_HANDLE;
@@ -282,7 +527,9 @@ CommunicationFunctions* create_socket_communication_functions(const char *addres
     CommunicationFunctions *comm = (CommunicationFunctions*)malloc(sizeof(CommunicationFunctions));
     comm->send_initial_load = socket_send_initial_load;
     comm->send_delta = socket_send_delta;
+    comm->send_hypothesis = socket_send_hypothesis;
     comm->request_ep_config = socket_request_ep_config;
+    comm->kill_connection = NULL;
     comm->command = NULL;
     SocketCommsData *sd = (SocketCommsData*)malloc(sizeof(SocketCommsData));
     sd->address = strdup(address);
@@ -300,6 +547,7 @@ void cb_start_server(CodeBuffer *parser_cb, const char *address, int port) {
     struct sockaddr_in serv_addr;
     int opt = 1;
     int addrlen = sizeof(serv_addr);
+    ParserDocumentSession *sessions = NULL;
 
 #ifdef _WIN32
     if (ensure_winsock_initialized() != 0) {
@@ -346,26 +594,22 @@ void cb_start_server(CodeBuffer *parser_cb, const char *address, int port) {
                 free(req);
                 CLOSE_SOCKET(new_socket);
                 continue;
-            } else if (req[0] == 'I') {
-                InitialLoad *load = cb_deserialize_initial_load(req + 2);
-                base_load_initial_content(parser_cb, load);
-            } else if (req[0] == 'D') {
-                Delta *delta = cb_deserialize_delta(req + 2);
-                base_replay_delta(parser_cb, delta);
-                base_parse_buffer(parser_cb);
-                free_delta(delta);
             }
 
-            CB_TokenStream *stream = cb_flatten_tree(parser_cb->parse_tree);
+            CB_ParseTree *tree = handle_parser_request(parser_cb, &sessions, req);
+            CB_TokenStream *stream = cb_flatten_tree(tree);
             char *resp = cb_serialize_token_stream(stream);
             send_msg(new_socket, resp);
             
             free(resp);
+            if (req[0] == 'H' && tree) cb_free_token_buffer(tree);
             if (stream) cb_free_token_stream(stream);
             free(req);
         }
         CLOSE_SOCKET(new_socket);
     }
+
+    free_parser_sessions(sessions);
 }
 
 /* --- STDIN/STDOUT (Pipe) Client Comms --- */
@@ -464,6 +708,25 @@ static CB_ParseTree* stdio_send_delta(CommunicationFunctions *comm_block, Delta 
     return tb;
 }
 
+static CB_ParseTree* stdio_send_hypothesis(CommunicationFunctions *comm_block, Delta *delta) {
+    StdioCommsData *sd = (StdioCommsData*)comm_block->comms_data;
+    char *payload = cb_serialize_delta(delta);
+    char *full_req = (char*)malloc(strlen(payload) + 10);
+    sprintf(full_req, "H|%s", payload);
+    stdio_send_msg(sd->write_fd, full_req);
+    free(payload);
+    free(full_req);
+
+    char *resp = stdio_receive_msg(sd->read_fd);
+    if (!resp) return NULL;
+
+    CB_TokenStream *stream = cb_deserialize_token_stream(resp);
+    free(resp);
+    CB_ParseTree *tb = cb_reconstruct_tree(stream);
+    if (stream) cb_free_token_stream(stream);
+    return tb;
+}
+
 static void stdio_request_ep_config(CommunicationFunctions *comm_block) {
     StdioCommsData *sd = (StdioCommsData*)comm_block->comms_data;
     stdio_send_msg(sd->write_fd, "C|EP");
@@ -530,6 +793,7 @@ CommunicationFunctions* create_stdio_communication_functions(const char *command
         CommunicationFunctions *comm = (CommunicationFunctions*)malloc(sizeof(CommunicationFunctions));
         comm->send_initial_load = stdio_send_initial_load;
         comm->send_delta = stdio_send_delta;
+        comm->send_hypothesis = stdio_send_hypothesis;
         comm->request_ep_config = stdio_request_ep_config;
         comm->kill_connection = stdio_kill_connection;
         comm->command = command ? strdup(command) : NULL;
@@ -560,6 +824,7 @@ void free_stdio_communication_functions(CommunicationFunctions *comm) {
 
 void cb_start_stdio_server(CodeBuffer *parser_cb) {
     LOG("Parser stdio server starting");
+    ParserDocumentSession *sessions = NULL;
 
     while (1) {
         char *req = stdio_receive_msg(STDIN_FILENO);
@@ -577,24 +842,19 @@ void cb_start_stdio_server(CodeBuffer *parser_cb) {
             free(resp);
             free(req);
             continue;
-        } else if (req[0] == 'I') {
-            InitialLoad *load = cb_deserialize_initial_load(req + 2);
-            base_load_initial_content(parser_cb, load);
-        } else if (req[0] == 'D') {
-            Delta *delta = cb_deserialize_delta(req + 2);
-            base_replay_delta(parser_cb, delta);
-            base_parse_buffer(parser_cb);
-            free_delta(delta);
         }
 
-        CB_TokenStream *stream = cb_flatten_tree(parser_cb->parse_tree);
+        CB_ParseTree *tree = handle_parser_request(parser_cb, &sessions, req);
+        CB_TokenStream *stream = cb_flatten_tree(tree);
         char *resp = cb_serialize_token_stream(stream);
         stdio_send_msg(STDOUT_FILENO, resp);
         
         free(resp);
+        if (req[0] == 'H' && tree) cb_free_token_buffer(tree);
         if (stream) cb_free_token_stream(stream);
         free(req);
     }
+    free_parser_sessions(sessions);
 }
 #else
 /* Windows STDIN/STDOUT Implementation */
@@ -689,6 +949,25 @@ static CB_ParseTree* win_stdio_send_delta(CommunicationFunctions *comm_block, De
     return tb;
 }
 
+static CB_ParseTree* win_stdio_send_hypothesis(CommunicationFunctions *comm_block, Delta *delta) {
+    WinStdioCommsData *sd = (WinStdioCommsData*)comm_block->comms_data;
+    char *payload = cb_serialize_delta(delta);
+    char *full_req = (char*)malloc(strlen(payload) + 10);
+    sprintf(full_req, "H|%s", payload);
+    win_stdio_send_msg(sd->write_handle, full_req);
+    free(payload);
+    free(full_req);
+
+    char *resp = win_stdio_receive_msg(sd->read_handle);
+    if (!resp) return NULL;
+
+    CB_TokenStream *stream = cb_deserialize_token_stream(resp);
+    free(resp);
+    CB_ParseTree *tb = cb_reconstruct_tree(stream);
+    if (stream) cb_free_token_stream(stream);
+    return tb;
+}
+
 static void win_stdio_request_ep_config(CommunicationFunctions *comm_block) {
     WinStdioCommsData *sd = (WinStdioCommsData*)comm_block->comms_data;
     win_stdio_send_msg(sd->write_handle, "C|EP");
@@ -763,6 +1042,7 @@ CommunicationFunctions* create_stdio_communication_functions(const char *command
     CommunicationFunctions *comm = (CommunicationFunctions*)malloc(sizeof(CommunicationFunctions));
     comm->send_initial_load = win_stdio_send_initial_load;
     comm->send_delta = win_stdio_send_delta;
+    comm->send_hypothesis = win_stdio_send_hypothesis;
     comm->request_ep_config = win_stdio_request_ep_config;
     comm->kill_connection = win_stdio_kill_connection;
     comm->command = command ? strdup(command) : NULL;
@@ -794,6 +1074,7 @@ void cb_start_stdio_server(CodeBuffer *parser_cb) {
     LOG("Parser stdio server starting");
     HANDLE hStdin = GetStdHandle(STD_INPUT_HANDLE);
     HANDLE hStdout = GetStdHandle(STD_OUTPUT_HANDLE);
+    ParserDocumentSession *sessions = NULL;
 
     while (1) {
         char *req = win_stdio_receive_msg(hStdin);
@@ -811,23 +1092,18 @@ void cb_start_stdio_server(CodeBuffer *parser_cb) {
             free(resp);
             free(req);
             continue;
-        } else if (req[0] == 'I') {
-            InitialLoad *load = cb_deserialize_initial_load(req + 2);
-            base_load_initial_content(parser_cb, load);
-        } else if (req[0] == 'D') {
-            Delta *delta = cb_deserialize_delta(req + 2);
-            base_replay_delta(parser_cb, delta);
-            base_parse_buffer(parser_cb);
-            free_delta(delta);
         }
 
-        CB_TokenStream *stream = cb_flatten_tree(parser_cb->parse_tree);
+        CB_ParseTree *tree = handle_parser_request(parser_cb, &sessions, req);
+        CB_TokenStream *stream = cb_flatten_tree(tree);
         char *resp = cb_serialize_token_stream(stream);
         win_stdio_send_msg(hStdout, resp);
 
         free(resp);
+        if (req[0] == 'H' && tree) cb_free_token_buffer(tree);
         if (stream) cb_free_token_stream(stream);
         free(req);
     }
+    free_parser_sessions(sessions);
 }
 #endif

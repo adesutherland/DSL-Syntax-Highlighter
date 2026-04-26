@@ -154,8 +154,34 @@ char* cb_serialize_delta(Delta *delta) {
     size_t cap = 1024;
     char *buf = (char*)malloc(cap);
     size_t len = 0;
+    const char *doc_id = delta->unique_document_id ? delta->unique_document_id : "";
+    const char *overlay_id = delta->overlay_id ? delta->overlay_id : "";
 
-    len += sprintf(buf + len, "%zu|%zu", delta->change_version, delta->transaction_count);
+    len += sprintf(buf + len, "2|");
+    for (size_t i = 0; doc_id[i]; i++) {
+        if (len + 4 > cap) {
+            cap *= 2;
+            buf = (char*)safe_realloc(buf, cap);
+        }
+        len += sprintf(buf + len, "%02x", (unsigned char)doc_id[i]);
+    }
+    if (len + 128 > cap) {
+        cap = len + 1024;
+        buf = (char*)safe_realloc(buf, cap);
+    }
+    len += sprintf(buf + len, "|%zu|%zu|", delta->base_version, delta->change_version);
+    for (size_t i = 0; overlay_id[i]; i++) {
+        if (len + 4 > cap) {
+            cap *= 2;
+            buf = (char*)safe_realloc(buf, cap);
+        }
+        len += sprintf(buf + len, "%02x", (unsigned char)overlay_id[i]);
+    }
+    if (len + 128 > cap) {
+        cap = len + 1024;
+        buf = (char*)safe_realloc(buf, cap);
+    }
+    len += sprintf(buf + len, "|%zu", delta->transaction_count);
 
     for (size_t i = 0; i < delta->transaction_count; i++) {
         Transaction *t = &delta->transactions[i];
@@ -217,11 +243,38 @@ Delta* cb_deserialize_delta(const char *data) {
     char *ptr = copy;
     char *token = safe_strtok(&ptr, "|");
     if (!token) { free(copy); free(delta); return NULL; }
-    delta->change_version = atoll(token);
+    memset(delta, 0, sizeof(*delta));
+
+    if (strcmp(token, "2") == 0) {
+        token = safe_strtok(&ptr, "|");
+        if (token && strlen(token) > 0) delta->unique_document_id = hex_decode(token);
+        else delta->unique_document_id = NULL;
+
+        token = safe_strtok(&ptr, "|");
+        if (!token) { free(copy); free_delta(delta); return NULL; }
+        delta->base_version = atoll(token);
+
+        token = safe_strtok(&ptr, "|");
+        if (!token) { free(copy); free_delta(delta); return NULL; }
+        delta->change_version = atoll(token);
+
+        token = safe_strtok(&ptr, "|");
+        if (token && strlen(token) > 0) delta->overlay_id = hex_decode(token);
+        else delta->overlay_id = NULL;
+
+        token = safe_strtok(&ptr, "|");
+        if (!token) { free(copy); free_delta(delta); return NULL; }
+        delta->transaction_count = atoll(token);
+    } else {
+        delta->base_version = 0;
+        delta->change_version = atoll(token);
+        delta->unique_document_id = NULL;
+        delta->overlay_id = NULL;
     
-    token = safe_strtok(&ptr, "|");
-    if (!token) { free(copy); free(delta); return NULL; }
-    delta->transaction_count = atoll(token);
+        token = safe_strtok(&ptr, "|");
+        if (!token) { free(copy); free_delta(delta); return NULL; }
+        delta->transaction_count = atoll(token);
+    }
     
     delta->transactions = (Transaction*)malloc(delta->transaction_count * sizeof(Transaction));
     for (size_t i = 0; i < delta->transaction_count; i++) {

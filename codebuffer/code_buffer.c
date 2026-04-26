@@ -376,6 +376,8 @@ CodeBuffer* create_code_buffer(CommunicationFunctions *comm, ParserFunction pars
     cb->communication_functions = comm;
     cb->parser_function = parser_function;
     cb->unique_document_id = NULL;
+    cb->async_parse_active = 0;
+    cb->parse_complete_pending = 0;
     cb->snapshot_number = 0;
     cb->snapshot_lines = NULL;
     cb->lines = NULL;
@@ -784,17 +786,19 @@ Delta* snapshot_and_get_delta(CodeBuffer *cb) {
         return NULL;
     }
 
-    cb->change_version++;
-
-    /* Allocate Delta */
     delta = (Delta *)malloc(sizeof(Delta));
     if (!delta) {
         LOG("Failed to allocate memory for Delta");
         return NULL;
     }
 
+    delta->unique_document_id = cb->unique_document_id ? strdup(cb->unique_document_id) : NULL;
+    delta->base_version = cb->change_version;
+    delta->change_version = cb->change_version + 1;
+    delta->overlay_id = NULL;
+    cb->change_version = delta->change_version;
+
     /* Transactions -> Delta */
-    delta->change_version = cb->change_version;
     delta->transaction_count = cb->transaction_count;
     delta->transactions = cb->transactions;
     cb->transactions = NULL;
@@ -811,6 +815,13 @@ void base_replay_delta(CodeBuffer *cb, Delta *delta) {
     size_t i;
 
     if (!cb || !delta) return;
+
+    if (delta->unique_document_id && cb->unique_document_id &&
+        strcmp(delta->unique_document_id, cb->unique_document_id) != 0) {
+        LOG("Sync Error: Document mismatch - buffer=%s delta=%s",
+                cb->unique_document_id, delta->unique_document_id);
+        return;
+    }
 
     if (delta->change_version != cb->change_version + 1) {
         LOG("Sync Error: Document version mismatch - expecting %d found %d",
@@ -833,6 +844,13 @@ void free_delta(Delta *delta) {
     size_t i;
 
     if (!delta) return;
+
+    if (delta->unique_document_id) {
+        free(delta->unique_document_id);
+    }
+    if (delta->overlay_id) {
+        free(delta->overlay_id);
+    }
 
     if (delta->transactions) {
         for (i = 0; i < delta->transaction_count; i++) {

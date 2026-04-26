@@ -75,6 +75,13 @@ if(PROJECT_IS_TOP_LEVEL OR BUILD_TESTING)
     add_executable(stdio_test stdio_test.c)
     target_link_libraries(stdio_test dslsyntax_editor)
 
+    add_executable(protocol_test_parser EXCLUDE_FROM_ALL protocol_test_parser.c)
+    target_link_libraries(protocol_test_parser dslsyntax_parser)
+
+    add_executable(protocol_test protocol_test.c)
+    target_link_libraries(protocol_test dslsyntax_editor)
+    add_dependencies(protocol_test protocol_test_parser)
+
     # --- Automated Testing ---
     add_test(NAME serialization_test COMMAND serialization_test)
     add_test(NAME diff_test COMMAND diff_test)
@@ -82,4 +89,5 @@ if(PROJECT_IS_TOP_LEVEL OR BUILD_TESTING)
     add_test(NAME socket_test COMMAND socket_test)
     set_tests_properties(socket_test PROPERTIES SKIP_RETURN_CODE 77)
     add_test(NAME stdio_test COMMAND stdio_test)
+    add_test(NAME protocol_test COMMAND protocol_test $<TARGET_FILE:protocol_test_parser>)
 endif()

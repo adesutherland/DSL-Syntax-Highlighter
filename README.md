@@ -23,6 +23,7 @@ DSLSH is a high-performance C-based platform that decouples language intelligenc
 - **[Protocol Specification](docs/PROTOCOL.md)**: Details on the socket-based message format.
 - **[Editor Integration Guide](docs/EDITOR_INTEGRATION.md)**: How to connect your editor to the platform.
 - **[Parser Integration Guide](docs/PARSER_INTEGRATION.md)**: How to build a language server.
+- **[Future Work](docs/FUTURE_WORK.md)**: Proposed directions such as code completion facilities.
 - **[AI Agent Guide (Gemini)](GEMINI.md)**: Guidance for AI-assisted maintenance.
 
 ## 🛠️ Quick Start

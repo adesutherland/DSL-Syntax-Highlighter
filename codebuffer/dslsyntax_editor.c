@@ -265,6 +265,8 @@ static void* load_initial_content_thread(void *arg) {
     }
 
     // Signal the parse complete event
+    data->code_buffer->async_parse_active = 0;
+    data->code_buffer->parse_complete_pending = 1;
     rc = raise_parse_complete_event();
     LOG("load_initial_content_thread: parse complete event raised");
 
@@ -351,10 +353,11 @@ void load_initial_content(CodeBuffer *cb, InitialLoad *initial_load) {
         exit(EXIT_FAILURE);
     }
 
-    if (editor_is_parsing_thread_active()) {
-        // PANIC
-        fprintf(stderr, "PANIC: Parsing thread is already active. Cannot load initial content.\n");
-        exit(EXIT_FAILURE);
+    if (cb->async_parse_active) {
+        LOG("load_initial_content: parser request already active for this buffer");
+        rc = exit_codeblock_critical_section();
+        free_initial_load(initial_load);
+        return;
     }
 
     // Reset the parse_complete_event
@@ -378,10 +381,13 @@ void load_initial_content(CodeBuffer *cb, InitialLoad *initial_load) {
     /* Set the thread data */
     arg->code_buffer = cb;
     arg->initial_load = initial_load_copy;
+    cb->async_parse_active = 1;
+    cb->parse_complete_pending = 0;
     LOG("load_initial_content: launching parser thread");
     rc = launch_parser_thread(load_initial_content_thread, arg);
     if (rc != 0) {
         LOG("load_initial_content: failed to launch thread");
+        cb->async_parse_active = 0;
         exit(EXIT_FAILURE);
     }
 
@@ -472,6 +478,8 @@ static void* process_delta_thread(void *arg) {
     }
 
     // Signal the parse complete event
+    data->code_buffer->async_parse_active = 0;
+    data->code_buffer->parse_complete_pending = 1;
     rc = raise_parse_complete_event();
     LOG("process_delta_thread: parse complete event raised");
 
@@ -511,8 +519,8 @@ void process_delta(CodeBuffer *cb) {
         exit(EXIT_FAILURE);
     }
 
-    if (editor_is_parsing_thread_active()) {
-        LOG("process_delta: parsing thread already active, skipping");
+    if (cb->async_parse_active) {
+        LOG("process_delta: parser request already active for this buffer, skipping");
         rc = exit_codeblock_critical_section();
         return;
     }
@@ -539,14 +547,53 @@ void process_delta(CodeBuffer *cb) {
     /* Set the thread data */
     arg->code_buffer = cb;
     arg->delta = delta;
+    cb->async_parse_active = 1;
+    cb->parse_complete_pending = 0;
     LOG("process_delta: launching parser thread");
     rc = launch_parser_thread(process_delta_thread, arg);
     if (rc != 0) {
         LOG("process_delta: failed to launch thread");
+        cb->async_parse_active = 0;
         exit(EXIT_FAILURE);
     }
 
     /* Exit the critical section */
     rc = exit_codeblock_critical_section();
     LOG("process_delta: finished");
+}
+
+CB_ParseTree *request_hypothesis_parse(CodeBuffer *cb,
+                                       Transaction *transactions,
+                                       size_t transaction_count,
+                                       const char *overlay_id) {
+    Delta delta;
+
+    if (!cb || !cb->communication_functions || !cb->communication_functions->send_hypothesis) {
+        return NULL;
+    }
+    if (cb->async_parse_active) {
+        LOG("request_hypothesis_parse: parser request already active for this buffer");
+        return NULL;
+    }
+
+    memset(&delta, 0, sizeof(delta));
+    delta.unique_document_id = cb->unique_document_id;
+    delta.base_version = cb->change_version;
+    delta.change_version = cb->change_version + 1;
+    delta.overlay_id = (char *)(overlay_id ? overlay_id : "hypothesis");
+    delta.transactions = transactions;
+    delta.transaction_count = transaction_count;
+
+    return cb->communication_functions->send_hypothesis(cb->communication_functions, &delta);
+}
+
+int cb_check_parse_complete_event(CodeBuffer *cb) {
+    if (!cb) return 0;
+    return cb->parse_complete_pending ? 1 : 0;
+}
+
+int cb_reset_parse_complete_event(CodeBuffer *cb) {
+    if (!cb) return -1;
+    cb->parse_complete_pending = 0;
+    return 0;
 }

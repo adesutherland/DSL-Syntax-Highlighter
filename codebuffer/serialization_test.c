@@ -86,7 +86,11 @@ void test_tree_flatten_reconstruct() {
 void test_delta_serialization() {
     printf("Testing delta serialization...\n");
     Delta delta;
+    memset(&delta, 0, sizeof(delta));
+    delta.unique_document_id = strdup("test_doc");
+    delta.base_version = 41;
     delta.change_version = 42;
+    delta.overlay_id = NULL;
     delta.transaction_count = 2;
     delta.transactions = (Transaction*)malloc(2 * sizeof(Transaction));
     
@@ -107,6 +111,9 @@ void test_delta_serialization() {
 
     Delta *delta2 = cb_deserialize_delta(serialized);
     assert(delta2 != NULL);
+    assert(delta2->unique_document_id != NULL);
+    assert(strcmp(delta2->unique_document_id, "test_doc") == 0);
+    assert(delta2->base_version == 41);
     assert(delta2->change_version == 42);
     assert(delta2->transaction_count == 2);
     assert(delta2->transactions[0].type == TRANSACTION_ADDCHARS);
@@ -116,10 +123,11 @@ void test_delta_serialization() {
 
     printf("Delta serialization successful.\n");
 
+    free(delta.unique_document_id);
     free(delta.transactions[0].content);
     free(delta.transactions);
     free(serialized);
-    /* Delta2 cleanup would be needed here but it's a test */
+    free_delta(delta2);
 }
 
 int main() {

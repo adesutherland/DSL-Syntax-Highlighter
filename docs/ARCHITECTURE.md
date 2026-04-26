@@ -14,6 +14,13 @@ Both the Editor (Client) and the Parser (Server) maintain a symmetric **CodeBuff
 - The Parser applies received deltas to its mirror buffer before re-parsing.
 - This ensures that both ends always agree on the document state and versioning.
 
+Parser transports can now retain more than one document mirror in one parser
+process. `InitialLoad` creates or replaces the session identified by
+`unique_document_id`; normal deltas mutate only that session. Hypothesis deltas
+reuse the same parser and retained language state, but parse against a scratch
+copy so code-completion previews can ask "what would the syntax be if this text
+were inserted?" without changing the real editor or parser buffer.
+
 ### 2.3 Emergency Parsing (Zero Latency)
 To avoid the "flicker" associated with asynchronous network communication, the library implements **Emergency Parsing**.
 - When an edit occurs, the library heuristically shifts and extends the existing local **CB_ParseTree** nodes.

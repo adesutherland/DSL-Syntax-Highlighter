@@ -155,7 +155,11 @@ int test_socket_communication() {
     if (tb) {
         printf("Client: Sending Delta...\n");
         Delta delta;
+        memset(&delta, 0, sizeof(delta));
+        delta.unique_document_id = strdup("test_doc");
+        delta.base_version = 1;
         delta.change_version = 2;
+        delta.overlay_id = NULL;
         delta.transaction_count = 1;
         delta.transactions = (Transaction*)malloc(sizeof(Transaction));
         delta.transactions[0].type = TRANSACTION_ADDCHARS;
@@ -165,6 +169,7 @@ int test_socket_communication() {
         delta.transactions[0].content = strdup(" Added");
 
         CB_ParseTree *tb2 = comm->send_delta(comm, &delta);
+        free(delta.unique_document_id);
         if (tb2) {
             printf("Client: Delta Result received.\n");
             cb_free_token_buffer(tb2);

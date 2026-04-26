@@ -57,11 +57,27 @@ for (int y = 0; y < visible_lines; y++) {
 ```
 
 ## 5. Handling Parser Updates
-The library signals `parse_complete_event` when a new tree arrives from the server. Your editor should listen for this to trigger a re-render.
+The library marks the owning `CodeBuffer` when a new tree arrives from the server. Your editor should listen for this to trigger a re-render.
 
 ```c
-if (check_parse_complete_event() == 1) {
-    reset_parse_complete_event();
+if (cb_check_parse_complete_event(cb) == 1) {
+    cb_reset_parse_complete_event(cb);
     // Trigger UI refresh
 }
+```
+
+## 6. Hypothesis Parsing
+For code completion or preview features, send a transaction list as a
+hypothesis. The parser returns a parse tree for the hypothetical text, but the
+real editor buffer and parser mirror are not changed.
+
+```c
+Transaction preview;
+preview.type = TRANSACTION_ADDCHARS;
+preview.pos_line = current_line;
+preview.pos_col = current_col;
+preview.content = "then";
+preview.count = 0;
+
+CB_ParseTree *preview_tree = request_hypothesis_parse(cb, &preview, 1, "completion");
 ```

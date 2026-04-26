@@ -38,9 +38,9 @@ static MutexType codeblock_mutex;
 static MutexType parser_active_mutex;
 static int parser_thread_initialized = 0; /* 0 for false, 1 for true */
 
-static ThreadType thread_id;      // Thread ID for the parsing thread
+static ThreadType thread_id;      // Retained for ABI compatibility; parser threads are detached
 static EventType parse_complete_event;   // This is the event that is signaled when parsing is complete
-static int parsing_thread_active; // 0 if no parsing thread is active, 1 if a thread is active
+static int active_parser_thread_count; // Number of active parser threads
 
 // Structure for thread launching arguments
 typedef struct {
@@ -104,7 +104,7 @@ int init_parser_thread_utils(void) {
     pthread_mutexattr_destroy(&attr); /* Attributes are no longer needed */
 #endif
     parser_thread_initialized = 1;
-    parsing_thread_active = 0; // No parsing thread is active initially
+    active_parser_thread_count = 0; // No parsing thread is active initially
     thread_id = 0; // Initialize thread ID to NULL
 
     // Initialize the parse complete event
@@ -281,7 +281,7 @@ int editor_is_parsing_thread_active(void) {
         fprintf(stderr, "Failed to enter critical section: %d\n", rc);
         exit(EXIT_FAILURE);
     }
-    int active = parsing_thread_active;
+    int active = active_parser_thread_count > 0;
     // Exit Critical Section
     rc = exit_parse_active_critical_section();
     if (rc != 0) {
@@ -309,7 +309,9 @@ static void* parser_thread_wrapper(void *arg_wrapper_pv) {
 
     // Thread work is complete, now update the active flag
     if (enter_parse_active_critical_section() == 0) {
-        parsing_thread_active = 0;
+        if (active_parser_thread_count > 0) {
+            active_parser_thread_count--;
+        }
         if (exit_parse_active_critical_section() != 0) {
             fprintf(stderr, "parser_thread_wrapper: Failed to exit critical section after resetting flag.\n");
             // Error already logged by exit_parser_critical_section
@@ -341,15 +343,12 @@ int launch_parser_thread(ParserThreadFunc start_routine, void *arg) {
         return -1; /* Failed to acquire mutex */
     }
 
-    if (parsing_thread_active) {
-        fprintf(stderr, "Error: A parsing thread is already active.\n");
-        exit_parse_active_critical_section(); /* Release mutex before returning */
-        return -2; /* Indicate thread already running */
-    }
+    active_parser_thread_count++;
 
     // Reset the parse complete event before starting a new thread
     if (reset_parse_complete_event() != 0) {
         fprintf(stderr, "Failed to reset parse complete event.\n");
+        if (active_parser_thread_count > 0) active_parser_thread_count--;
         exit_parse_active_critical_section(); /* Release mutex */
         return -1; /* Reset failure */
     }
@@ -358,6 +357,7 @@ int launch_parser_thread(ParserThreadFunc start_routine, void *arg) {
     ThreadWrapperArgs *wrapper_args = (ThreadWrapperArgs *)malloc(sizeof(ThreadWrapperArgs));
     if (!wrapper_args) {
         fprintf(stderr, "Failed to allocate memory for thread wrapper arguments.\n");
+        if (active_parser_thread_count > 0) active_parser_thread_count--;
         exit_parse_active_critical_section(); /* Release mutex */
         return -1; /* Allocation failure */
     }
@@ -369,28 +369,24 @@ int launch_parser_thread(ParserThreadFunc start_routine, void *arg) {
     if (thread_id == NULL) {
         fprintf(stderr, "Failed to create thread. Windows Error: %lu\n", GetLastError());
         free(wrapper_args); // Clean up allocated memory
+        if (active_parser_thread_count > 0) active_parser_thread_count--;
         exit_parse_active_critical_section(); /* Release mutex */
         return -1;
     }
+    CloseHandle(thread_id);
+    thread_id = 0;
 #else /* POSIX */
-    pthread_t *pt = (pthread_t*)malloc(sizeof(pthread_t));
-    if (!pt) {
-        perror("Failed to allocate pthread_t");
-        free(wrapper_args);
-        exit_parse_active_critical_section();
-        return -1;
-    }
-    if (pthread_create(pt, NULL, parser_thread_wrapper, wrapper_args) != 0) {
+    pthread_t pt;
+    if (pthread_create(&pt, NULL, parser_thread_wrapper, wrapper_args) != 0) {
         perror("Failed to create thread");
-        free(pt);
         free(wrapper_args); // Clean up allocated memory
+        if (active_parser_thread_count > 0) active_parser_thread_count--;
         exit_parse_active_critical_section(); /* Release mutex */
         return -1;
     }
-    thread_id = (ThreadType)pt;
+    pthread_detach(pt);
+    thread_id = 0;
 #endif
-
-    parsing_thread_active = 1; // Set the flag indicating a thread is now active
 
     if (exit_parse_active_critical_section() != 0) {
         // Error logged by exit_parser_critical_section.
@@ -408,27 +404,13 @@ int launch_parser_thread(ParserThreadFunc start_routine, void *arg) {
  * Joins (waits for) the parser thread to complete its execution. (Implementation as provided by user)
  */
 int join_parser_thread() {
+    while (editor_is_parsing_thread_active()) {
 #ifdef _WIN32
-    DWORD wait_result;
-    wait_result = WaitForSingleObject(thread_id, INFINITE);
-    if (wait_result == WAIT_FAILED) {
-        fprintf(stderr, "Failed to join thread. Windows Error: %lu\n", GetLastError());
-        CloseHandle(thread_id);
-        return -1;
-    }
-    CloseHandle(thread_id);
+        Sleep(10);
 #else /* POSIX */
-    if (!thread_id) {
-        return 0;
-    }
-    pthread_t pt = *(pthread_t*)thread_id;
-    if (pthread_join(pt, NULL) != 0) {
-        perror("Failed to join thread");
-        return -1;
-    }
-    free(thread_id);
-    thread_id = 0;
+        usleep(10000);
 #endif
+    }
     return 0;
 }
 
