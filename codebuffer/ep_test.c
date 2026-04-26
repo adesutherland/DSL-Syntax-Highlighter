@@ -4,6 +4,7 @@
 #include <assert.h>
 #include <unistd.h>
 #include "dslsyntax_common.h"
+#include "dslsyntax_editor.h"
 #include "dslsyntax_log.h"
 
 /* Helper to setup a simple CodeBuffer with text */
@@ -78,6 +79,30 @@ void test_ep_learning_comprehensive() {
     assert(cb->lines[1].characters[10].token_type == LEXER_OPERATOR);
     
     printf("EP Learning (Comprehensive) passed!\n");
+    free_code_buffer(cb);
+}
+
+void test_highlight_first_line_token() {
+    printf("Testing Highlighting First-Line Tokens...\n");
+    CodeBuffer *cb = setup_cb("test.toy", "say x");
+    cb->parse_tree = cb_create_token_buffer();
+
+    CB_Node root = cb_create_node(PARSE_TREE_FILE, 0, get_code_buffer_length(cb));
+    cb_add_child_node(cb->parse_tree, root);
+    cb_set_current_parent_to_root_node(cb->parse_tree);
+
+    cb_add_child_node(cb->parse_tree, cb_create_node(LEXER_KEYWORD, 0, 3));
+    cb_add_child_node(cb->parse_tree, cb_create_node(LEXER_WHITESPACE, 3, 1));
+    cb_add_child_node(cb->parse_tree, cb_create_node(LEXER_IDENTIFIER, 4, 1));
+
+    highlight_syntax(cb);
+
+    assert(cb->lines[0].characters[0].token_type == LEXER_KEYWORD);
+    assert(cb->lines[0].characters[1].token_type == LEXER_KEYWORD);
+    assert(cb->lines[0].characters[2].token_type == LEXER_KEYWORD);
+    assert(cb->lines[0].characters[4].token_type == LEXER_IDENTIFIER);
+
+    printf("Highlighting First-Line Tokens passed!\n");
     free_code_buffer(cb);
 }
 
@@ -251,6 +276,7 @@ void test_ep_ident_extra_chars() {
 }
 
 int main() {
+    test_highlight_first_line_token();
     test_ep_learning_comprehensive();
     test_ep_block_comment_learning();
     test_ep_preservation();

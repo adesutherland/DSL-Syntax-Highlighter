@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 #ifdef _WIN32
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -621,6 +622,127 @@ typedef struct {
     pid_t pid;
 } StdioCommsData;
 
+static void free_command_argv(char **argv) {
+    if (!argv) return;
+    for (size_t i = 0; argv[i] != NULL; i++) {
+        free(argv[i]);
+    }
+    free(argv);
+}
+
+static int append_char(char **buf, size_t *len, size_t *capacity, char ch) {
+    char *new_buf;
+
+    if (*len + 1 >= *capacity) {
+        size_t new_capacity = (*capacity == 0) ? 16 : (*capacity * 2);
+        new_buf = (char*)realloc(*buf, new_capacity);
+        if (!new_buf) return -1;
+        *buf = new_buf;
+        *capacity = new_capacity;
+    }
+
+    (*buf)[(*len)++] = ch;
+    return 0;
+}
+
+static int append_arg(char ***argv, size_t *argc, size_t *capacity, char *arg) {
+    char **new_argv;
+
+    if (*argc + 1 >= *capacity) {
+        size_t new_capacity = (*capacity == 0) ? 8 : (*capacity * 2);
+        new_argv = (char**)realloc(*argv, new_capacity * sizeof(char*));
+        if (!new_argv) return -1;
+        *argv = new_argv;
+        *capacity = new_capacity;
+    }
+
+    (*argv)[(*argc)++] = arg;
+    (*argv)[*argc] = NULL;
+    return 0;
+}
+
+static char **split_command_args(const char *command) {
+    char **argv = NULL;
+    size_t argc = 0;
+    size_t argv_capacity = 0;
+    const char *p = command;
+
+    if (!command) return NULL;
+
+    while (*p) {
+        char *arg = NULL;
+        size_t arg_len = 0;
+        size_t arg_capacity = 0;
+        char quote = '\0';
+
+        while (*p && isspace((unsigned char)*p)) p++;
+        if (!*p) break;
+
+        while (*p) {
+            char ch = *p;
+
+            if (quote) {
+                if (ch == quote) {
+                    quote = '\0';
+                    p++;
+                    continue;
+                }
+                if (quote == '"' && ch == '\\' && p[1] != '\0') {
+                    p++;
+                    ch = *p;
+                }
+                if (append_char(&arg, &arg_len, &arg_capacity, ch) != 0) {
+                    free(arg);
+                    free_command_argv(argv);
+                    return NULL;
+                }
+                p++;
+                continue;
+            }
+
+            if (ch == '\'' || ch == '"') {
+                quote = ch;
+                p++;
+                continue;
+            }
+            if (isspace((unsigned char)ch)) break;
+            if (ch == '\\' && p[1] != '\0') {
+                p++;
+                ch = *p;
+            }
+            if (append_char(&arg, &arg_len, &arg_capacity, ch) != 0) {
+                free(arg);
+                free_command_argv(argv);
+                return NULL;
+            }
+            p++;
+        }
+
+        if (quote) {
+            free(arg);
+            free_command_argv(argv);
+            return NULL;
+        }
+        if (append_char(&arg, &arg_len, &arg_capacity, '\0') != 0) {
+            free(arg);
+            free_command_argv(argv);
+            return NULL;
+        }
+        if (append_arg(&argv, &argc, &argv_capacity, arg) != 0) {
+            free(arg);
+            free_command_argv(argv);
+            return NULL;
+        }
+    }
+
+    if (argc == 0) {
+        free_command_argv(argv);
+        return NULL;
+    }
+
+    return argv;
+}
+
 static int write_all(int fd, const char *buf, size_t len) {
     size_t total = 0;
     while (total < len) {
@@ -771,19 +893,14 @@ CommunicationFunctions* create_stdio_communication_functions(const char *command
         close(pipe_in[0]); close(pipe_in[1]);
         close(pipe_out[0]); close(pipe_out[1]);
 
-        /* Split command into args for execvp */
-        char *cmd_copy = strdup(command);
-        char *argv[10];
-        int i = 0;
-        char *token = strtok(cmd_copy, " ");
-        while (token && i < 9) {
-            argv[i++] = token;
-            token = strtok(NULL, " ");
+        char **argv = split_command_args(command);
+        if (!argv) {
+            fprintf(stderr, "Invalid parser command: %s\n", command ? command : "(null)");
+            exit(EXIT_FAILURE);
         }
-        argv[i] = NULL;
-
         execvp(argv[0], argv);
         perror("execvp failed");
+        free_command_argv(argv);
         exit(EXIT_FAILURE);
     } else {
         /* Parent: Editor */

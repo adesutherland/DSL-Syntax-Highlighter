@@ -10,11 +10,56 @@
 #define X_OK 1 /* execute permission */
 #endif
 #else
+#include <limits.h>
 #include <unistd.h>
 #define ACCESS access
+#ifndef PATH_MAX
+#define PATH_MAX 4096
+#endif
 #endif
 #include "dslsyntax_common.h"
 #include "serialization.h"
+
+#ifndef _WIN32
+static void test_stdio_quoted_parser_path(const char *parser_cmd) {
+    char dir_template[PATH_MAX];
+    char parser_path[PATH_MAX];
+    char linked_path[PATH_MAX];
+    char quoted_cmd[PATH_MAX * 2];
+    const char *tmpdir = getenv("TMPDIR");
+
+    printf("Testing quoted parser command path...\n");
+
+    if (!tmpdir) tmpdir = "/tmp";
+    assert(snprintf(dir_template, sizeof(dir_template), "%s/dslsh parser test.XXXXXX", tmpdir) < (int)sizeof(dir_template));
+    assert(mkdtemp(dir_template) != NULL);
+    assert(realpath(parser_cmd, parser_path) != NULL);
+    assert(snprintf(linked_path, sizeof(linked_path), "%s/tp with spaces", dir_template) < (int)sizeof(linked_path));
+    assert(symlink(parser_path, linked_path) == 0);
+    assert(snprintf(quoted_cmd, sizeof(quoted_cmd), "\"%s\" -d", linked_path) < (int)sizeof(quoted_cmd));
+
+    CommunicationFunctions *comm = create_stdio_communication_functions(quoted_cmd);
+    assert(comm != NULL);
+
+    InitialLoad load;
+    load.unique_document_id = strdup("quoted_test_doc");
+    load.change_version = 1;
+    load.line_count = 1;
+    load.lines = (CodeBufferLine*)malloc(sizeof(CodeBufferLine));
+    utf8_to_line("say quoted", &load.lines[0]);
+
+    CB_ParseTree *tb = comm->send_initial_load(comm, &load);
+    assert(tb != NULL);
+    assert(tb->root != NULL);
+
+    cb_free_token_buffer(tb);
+    free_stdio_communication_functions(comm);
+    unlink(linked_path);
+    rmdir(dir_template);
+
+    printf("Quoted parser command path test successful!\n");
+}
+#endif
 
 void test_stdio_communication() {
     printf("Testing stdio communication...\n");
@@ -138,6 +183,10 @@ void test_stdio_communication() {
     /* Cleanup client */
     if (tb) cb_free_token_buffer(tb);
     free_stdio_communication_functions(comm);
+
+#ifndef _WIN32
+    test_stdio_quoted_parser_path(parser_cmd);
+#endif
     
     printf("Stdio communication test successful!\n");
 }
