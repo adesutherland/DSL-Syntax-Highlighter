@@ -3,6 +3,21 @@ project(codebuffer C)
 
 set(CMAKE_C_STANDARD 11)
 
+if(NOT DEFINED DSLSH_INSTALL)
+    if(PROJECT_IS_TOP_LEVEL)
+        set(DSLSH_INSTALL ON)
+    else()
+        set(DSLSH_INSTALL OFF)
+    endif()
+endif()
+if(NOT DEFINED DSLSH_BUILD_TESTS)
+    if(PROJECT_IS_TOP_LEVEL)
+        set(DSLSH_BUILD_TESTS ON)
+    else()
+        set(DSLSH_BUILD_TESTS OFF)
+    endif()
+endif()
+
 # Common sources for both editor and parser
 set(COMMON_SOURCES
         code_buffer.c 
@@ -26,19 +41,27 @@ add_library(dslsyntax_editor
         ${COMMON_SOURCES}
         dslsyntax_editor.c 
         dslsyntax_editor.h)
+target_include_directories(dslsyntax_editor PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+        $<INSTALL_INTERFACE:include/dslsyntax>)
+add_library(DSLSH::editor ALIAS dslsyntax_editor)
 
 # Add the library for the highlighter (parser)
 add_library(dslsyntax_parser
         ${COMMON_SOURCES}
         dslsyntax_parser.c 
         dslsyntax_parser.h)
+target_include_directories(dslsyntax_parser PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+        $<INSTALL_INTERFACE:include/dslsyntax>)
+add_library(DSLSH::parser ALIAS dslsyntax_parser)
 
 if(WIN32)
     target_link_libraries(dslsyntax_editor PUBLIC ws2_32)
     target_link_libraries(dslsyntax_parser PUBLIC ws2_32)
 endif()
 
-if(PROJECT_IS_TOP_LEVEL OR BUILD_TESTING)
+if(DSLSH_BUILD_TESTS)
     # Test programs
     if(TARGET highlighter)
         add_executable(code_test EXCLUDE_FROM_ALL test.c)
@@ -90,4 +113,21 @@ if(PROJECT_IS_TOP_LEVEL OR BUILD_TESTING)
     set_tests_properties(socket_test PROPERTIES SKIP_RETURN_CODE 77)
     add_test(NAME stdio_test COMMAND stdio_test)
     add_test(NAME protocol_test COMMAND protocol_test $<TARGET_FILE:protocol_test_parser>)
+endif()
+
+if(DSLSH_INSTALL)
+    install(TARGETS dslsyntax_editor dslsyntax_parser
+            ARCHIVE DESTINATION lib
+            LIBRARY DESTINATION lib
+            RUNTIME DESTINATION bin)
+    install(FILES
+            dslsyntax_common.h
+            dslsyntax_editor.h
+            dslsyntax_log.h
+            dslsyntax_parser.h
+            diff.h
+            serialization.h
+            thread_utils.h
+            utf8.h
+            DESTINATION include/dslsyntax)
 endif()

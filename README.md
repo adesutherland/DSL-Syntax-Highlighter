@@ -13,6 +13,7 @@ DSLSH is a high-performance C-based platform that decouples language intelligenc
 
 ## 📁 Project Structure
 - **`codebuffer/`**: The core platform library. Handles all synchronization, transport, and data structures.
+- **`parsers/`**: Standard language parser adapters, starting with Markdown via `cmark-gfm`.
 - **`toyeditor/`**: A reference `ncurses` implementation of a client editor.
 - **`toyparser/`**: A reference language parser server implementing a custom DSL.
 - **`docs/`**: Deep-dive technical documentation and integration guides.
@@ -34,6 +35,25 @@ mkdir -p cmake-build-debug && cd cmake-build-debug
 cmake ..
 cmake --build .
 ```
+
+By default, a standalone DSLSH build includes the middleware, examples, tools,
+tests, and bundled parser adapters. Downstream consumers such as CREXX and THE
+should build only the middleware surface they need.
+
+Useful CMake options:
+
+```bash
+-DDSLSH_BUILD_CORE=ON       # dslsyntax_editor and dslsyntax_parser
+-DDSLSH_BUILD_TOOLS=ON      # parser_tester and middleware tools
+-DDSLSH_BUILD_EXAMPLES=OFF  # toy editor/parser programs
+-DDSLSH_BUILD_PARSERS=OFF   # bundled language parser adapters
+-DDSLSH_BUILD_TESTS=OFF     # DSLSH's own tests
+-DDSLSH_INSTALL=OFF         # install DSLSH products from this build
+```
+
+Parser adapters under `parsers/` are optional. Their third-party dependencies
+must stay behind `DSLSH_BUILD_PARSERS` and parser-specific options, so editor
+and compiler consumers do not inherit those dependencies.
 
 On Windows, `toyeditor` is only built when a vendored `PDCursesMod` checkout is
 present at `third_party/PDCursesMod`. When present, it is linked statically

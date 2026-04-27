@@ -4,9 +4,8 @@ project(testeditor C)
 set(CMAKE_C_STANDARD 11)
 
 add_executable(te editor.c)
-target_include_directories(te PRIVATE "${DSL_Syntax_Highlighter_SOURCE_DIR}/codebuffer")
 target_include_directories(te PRIVATE "${DSL_Syntax_Highlighter_SOURCE_DIR}/toyparser")
-target_link_libraries(te PRIVATE dslsyntax_editor dslsyntax_parser highlighter)
+target_link_libraries(te PRIVATE DSLSH::editor DSLSH::parser highlighter)
 
 if(WIN32)
   set(PDCURSESMOD_SOURCE_DIR
@@ -52,4 +51,6 @@ else()
 endif()
 
 # Install target
-install(TARGETS te DESTINATION bin)
+if(DSLSH_INSTALL)
+  install(TARGETS te DESTINATION bin)
+endif()
