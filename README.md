@@ -13,7 +13,7 @@ DSLSH is a high-performance C-based platform that decouples language intelligenc
 
 ## 📁 Project Structure
 - **`codebuffer/`**: The core platform library. Handles all synchronization, transport, and data structures.
-- **`parsers/`**: Standard language parser adapters, starting with Markdown via `cmark-gfm`.
+- **`parsers/`**: Standard language parser adapters for C, Python, JavaScript, and Markdown.
 - **`toyeditor/`**: A reference `ncurses` implementation of a client editor.
 - **`toyparser/`**: A reference language parser server implementing a custom DSL.
 - **`docs/`**: Deep-dive technical documentation and integration guides.
@@ -54,6 +54,20 @@ Useful CMake options:
 Parser adapters under `parsers/` are optional. Their third-party dependencies
 must stay behind `DSLSH_BUILD_PARSERS` and parser-specific options, so editor
 and compiler consumers do not inherit those dependencies.
+
+Bundled parser adapters can also be controlled individually:
+
+```bash
+-DDSLSH_BUILD_C=ON           # C parser, builds parsers/c/dslsh-c
+-DDSLSH_BUILD_PYTHON=ON      # Python parser, builds parsers/python/pyp
+-DDSLSH_BUILD_JAVASCRIPT=ON  # JavaScript parser, builds parsers/javascript/jsp
+-DDSLSH_BUILD_MARKDOWN=ON    # Markdown parser, builds parsers/markdown/mdp
+```
+
+Installed executables are placed in `bin/` and the DSLSH shared libraries in
+`lib/`. Parser adapter internals are linked into their executables, so the
+installed C, Python, JavaScript, and Markdown parsers do not require separate
+adapter-specific shared libraries.
 
 On Windows, `toyeditor` is only built when a vendored `PDCursesMod` checkout is
 present at `third_party/PDCursesMod`. When present, it is linked statically

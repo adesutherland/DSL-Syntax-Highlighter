@@ -21,6 +21,9 @@ typedef void *(*ParserThreadFunc)(void *arg);
  */
 int init_parser_thread_utils(void);
 
+/* Returns 1 once init_parser_thread_utils() has completed; otherwise 0. */
+int parser_thread_utils_is_initialized(void);
+
 /*
  * Destroys threading resources allocated by init_parser_thread_utils().
  */

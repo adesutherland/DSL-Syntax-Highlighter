@@ -16,6 +16,9 @@ void editor_init();
 /* Function to gracefully free the editor side of the library */
 void editor_free();
 
+/* Wait for any outstanding parser worker threads without freeing editor state. */
+void editor_wait_for_parser_threads();
+
 /* Function to forcefully terminate the parser connection / child process */
 void cb_kill_parser_process(CodeBuffer *cb);
 

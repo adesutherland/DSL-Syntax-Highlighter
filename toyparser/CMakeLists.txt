@@ -4,7 +4,7 @@ project(toyparser C)
 set(CMAKE_C_STANDARD 11)
 
 # Build the highlighter library
-add_library(highlighter parser.c parser_hightlighter.c)
+add_library(highlighter STATIC parser.c parser_hightlighter.c)
 # Include codebuffer in the include directories
 target_include_directories(highlighter PRIVATE .)
 target_link_libraries(highlighter PRIVATE DSLSH::parser)
@@ -17,6 +17,7 @@ target_link_libraries(tp highlighter)
 
 # Link codebuffer to the parser
 target_link_libraries(tp DSLSH::parser)
+dslsh_set_install_rpath(tp)
 
 # Install target
 if(DSLSH_INSTALL)

@@ -139,6 +139,10 @@ int init_parser_thread_utils(void) {
     return 0;
 }
 
+int parser_thread_utils_is_initialized(void) {
+    return parser_thread_initialized;
+}
+
 /*
  * Destroys the threading utility's global mutex.
  */

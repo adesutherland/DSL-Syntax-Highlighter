@@ -35,6 +35,13 @@ void editor_free() {
     destroy_thread_utils();
 }
 
+void editor_wait_for_parser_threads() {
+    if (editor_is_parsing_thread_active()) {
+        LOG("editor_wait_for_parser_threads: waiting for parser thread to finish");
+        join_parser_thread();
+    }
+}
+
 /* Utility to convert the first line of a null terminated utf8 or ascii string to a line */
 /* Newline is not included in the output */
 

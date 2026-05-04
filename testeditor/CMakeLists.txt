@@ -6,6 +6,7 @@ set(CMAKE_C_STANDARD 11)
 add_executable(te editor.c)
 target_include_directories(te PRIVATE "${DSL_Syntax_Highlighter_SOURCE_DIR}/toyparser")
 target_link_libraries(te PRIVATE DSLSH::editor DSLSH::parser highlighter)
+dslsh_set_install_rpath(te)
 
 if(WIN32)
   set(PDCURSESMOD_SOURCE_DIR

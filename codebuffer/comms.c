@@ -10,9 +10,11 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <sys/select.h>
 #include <unistd.h>
 #include <signal.h>
 #include <sys/wait.h>
+#include <fcntl.h>
 #endif
 #include <errno.h>
 
@@ -620,7 +622,13 @@ typedef struct {
     int read_fd;
     int write_fd;
     pid_t pid;
+    volatile sig_atomic_t shutting_down;
 } StdioCommsData;
+
+#define STDIO_IO_POLL_USEC 100000
+#define STDIO_TERM_WAIT_USEC 20000
+#define STDIO_TERM_WAIT_ATTEMPTS 25
+#define STDIO_KILL_WAIT_ATTEMPTS 100
 
 static void free_command_argv(char **argv) {
     if (!argv) return;
@@ -769,6 +777,67 @@ static int read_all(int fd, char *buf, size_t len) {
     return 0;
 }
 
+static int wait_for_stdio_fd(StdioCommsData *sd, int fd, int write_ready) {
+    if (!sd || fd < 0) return -1;
+
+    while (!sd->shutting_down) {
+        fd_set fds;
+        struct timeval timeout;
+        int rc;
+
+        FD_ZERO(&fds);
+        FD_SET(fd, &fds);
+        timeout.tv_sec = 0;
+        timeout.tv_usec = STDIO_IO_POLL_USEC;
+
+        rc = select(fd + 1, write_ready ? NULL : &fds, write_ready ? &fds : NULL, NULL, &timeout);
+        if (rc > 0) return 0;
+        if (rc == 0) continue;
+        if (errno == EINTR) continue;
+        return -1;
+    }
+
+    return -1;
+}
+
+static int write_all_interruptible(StdioCommsData *sd, int fd, const char *buf, size_t len) {
+    size_t total = 0;
+
+    while (total < len) {
+        ssize_t n;
+
+        if (wait_for_stdio_fd(sd, fd, 1) != 0) return -1;
+        n = write(fd, buf + total, len - total);
+        if (n <= 0) {
+            if (n < 0 && errno == EINTR) continue;
+            if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) continue;
+            return -1;
+        }
+        total += n;
+    }
+
+    return 0;
+}
+
+static int read_all_interruptible(StdioCommsData *sd, int fd, char *buf, size_t len) {
+    size_t total = 0;
+
+    while (total < len) {
+        ssize_t n;
+
+        if (wait_for_stdio_fd(sd, fd, 0) != 0) return -1;
+        n = read(fd, buf + total, len - total);
+        if (n <= 0) {
+            if (n < 0 && errno == EINTR) continue;
+            if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) continue;
+            return -1;
+        }
+        total += n;
+    }
+
+    return 0;
+}
+
 static int stdio_send_msg(int fd, const char *msg) {
     uint32_t len = strlen(msg);
     char len_hex[9];
@@ -792,16 +861,92 @@ static char* stdio_receive_msg(int fd) {
     return buf;
 }
 
+static int stdio_send_client_msg(StdioCommsData *sd, const char *msg) {
+    uint32_t len;
+    char len_hex[9];
+
+    if (!sd || sd->write_fd < 0 || sd->shutting_down) return -1;
+    len = strlen(msg);
+    sprintf(len_hex, "%08x", len);
+    if (write_all_interruptible(sd, sd->write_fd, len_hex, 8) < 0) return -1;
+    return write_all_interruptible(sd, sd->write_fd, msg, len);
+}
+
+static char* stdio_receive_client_msg(StdioCommsData *sd) {
+    char len_hex[9];
+    uint32_t len;
+    char *buf;
+
+    if (!sd || sd->read_fd < 0 || sd->shutting_down) return NULL;
+    if (read_all_interruptible(sd, sd->read_fd, len_hex, 8) < 0) return NULL;
+    len_hex[8] = '\0';
+    if (sscanf(len_hex, "%x", &len) != 1) return NULL;
+    buf = (char*)malloc(len + 1);
+    if (!buf) return NULL;
+    if (read_all_interruptible(sd, sd->read_fd, buf, len) < 0) {
+        free(buf);
+        return NULL;
+    }
+    buf[len] = '\0';
+    return buf;
+}
+
+static void stdio_reap_child(StdioCommsData *sd, int terminate_first) {
+    int status;
+
+    if (!sd || sd->pid <= 0) return;
+    if (terminate_first) kill(sd->pid, SIGTERM);
+
+    for (int i = 0; i < STDIO_TERM_WAIT_ATTEMPTS; i++) {
+        pid_t rc = waitpid(sd->pid, &status, WNOHANG);
+        if (rc == sd->pid || (rc < 0 && errno == ECHILD)) {
+            sd->pid = -1;
+            return;
+        }
+        if (rc < 0 && errno != EINTR) {
+            sd->pid = -1;
+            return;
+        }
+        usleep(STDIO_TERM_WAIT_USEC);
+    }
+
+    kill(sd->pid, SIGKILL);
+    for (int i = 0; i < STDIO_KILL_WAIT_ATTEMPTS; i++) {
+        pid_t rc = waitpid(sd->pid, &status, WNOHANG);
+        if (rc == sd->pid || (rc < 0 && errno == ECHILD)) {
+            sd->pid = -1;
+            return;
+        }
+        if (rc < 0 && errno != EINTR) {
+            sd->pid = -1;
+            return;
+        }
+        usleep(STDIO_TERM_WAIT_USEC);
+    }
+
+    LOG("stdio_reap_child: child pid %d did not exit after SIGKILL", (int)sd->pid);
+}
+
+static void set_fd_nonblocking(int fd) {
+    int flags;
+
+    if (fd < 0) return;
+    flags = fcntl(fd, F_GETFL, 0);
+    if (flags < 0) return;
+    fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+}
+
 static CB_ParseTree* stdio_send_initial_load(CommunicationFunctions *comm_block, InitialLoad *initial_load) {
     StdioCommsData *sd = (StdioCommsData*)comm_block->comms_data;
     char *payload = cb_serialize_initial_load(initial_load);
     char *full_req = (char*)malloc(strlen(payload) + 10);
     sprintf(full_req, "I|%s", payload);
-    stdio_send_msg(sd->write_fd, full_req);
+    int send_rc = stdio_send_client_msg(sd, full_req);
     free(payload);
     free(full_req);
+    if (send_rc != 0) return NULL;
 
-    char *resp = stdio_receive_msg(sd->read_fd);
+    char *resp = stdio_receive_client_msg(sd);
     if (!resp) return NULL;
 
     CB_TokenStream *stream = cb_deserialize_token_stream(resp);
@@ -816,11 +961,12 @@ static CB_ParseTree* stdio_send_delta(CommunicationFunctions *comm_block, Delta 
     char *payload = cb_serialize_delta(delta);
     char *full_req = (char*)malloc(strlen(payload) + 10);
     sprintf(full_req, "D|%s", payload);
-    stdio_send_msg(sd->write_fd, full_req);
+    int send_rc = stdio_send_client_msg(sd, full_req);
     free(payload);
     free(full_req);
+    if (send_rc != 0) return NULL;
 
-    char *resp = stdio_receive_msg(sd->read_fd);
+    char *resp = stdio_receive_client_msg(sd);
     if (!resp) return NULL;
 
     CB_TokenStream *stream = cb_deserialize_token_stream(resp);
@@ -835,11 +981,12 @@ static CB_ParseTree* stdio_send_hypothesis(CommunicationFunctions *comm_block, D
     char *payload = cb_serialize_delta(delta);
     char *full_req = (char*)malloc(strlen(payload) + 10);
     sprintf(full_req, "H|%s", payload);
-    stdio_send_msg(sd->write_fd, full_req);
+    int send_rc = stdio_send_client_msg(sd, full_req);
     free(payload);
     free(full_req);
+    if (send_rc != 0) return NULL;
 
-    char *resp = stdio_receive_msg(sd->read_fd);
+    char *resp = stdio_receive_client_msg(sd);
     if (!resp) return NULL;
 
     CB_TokenStream *stream = cb_deserialize_token_stream(resp);
@@ -851,8 +998,8 @@ static CB_ParseTree* stdio_send_hypothesis(CommunicationFunctions *comm_block, D
 
 static void stdio_request_ep_config(CommunicationFunctions *comm_block) {
     StdioCommsData *sd = (StdioCommsData*)comm_block->comms_data;
-    stdio_send_msg(sd->write_fd, "C|EP");
-    char *resp = stdio_receive_msg(sd->read_fd);
+    if (stdio_send_client_msg(sd, "C|EP") != 0) return;
+    char *resp = stdio_receive_client_msg(sd);
     if (resp && resp[0] == 'C' && resp[1] == '|') {
         cb_load_ep_config_from_string(resp + 2);
     }
@@ -862,9 +1009,9 @@ static void stdio_request_ep_config(CommunicationFunctions *comm_block) {
 static void stdio_kill_connection(CommunicationFunctions *comm_block) {
     if (!comm_block || !comm_block->comms_data) return;
     StdioCommsData *sd = (StdioCommsData*)comm_block->comms_data;
+    sd->shutting_down = 1;
     if (sd->pid > 0) {
         kill(sd->pid, SIGKILL);
-        sd->pid = -1;
     }
     if (sd->read_fd >= 0) { close(sd->read_fd); sd->read_fd = -1; }
     if (sd->write_fd >= 0) { close(sd->write_fd); sd->write_fd = -1; }
@@ -918,6 +1065,9 @@ CommunicationFunctions* create_stdio_communication_functions(const char *command
         sd->read_fd = pipe_out[0];
         sd->write_fd = pipe_in[1];
         sd->pid = pid;
+        sd->shutting_down = 0;
+        set_fd_nonblocking(sd->read_fd);
+        set_fd_nonblocking(sd->write_fd);
         comm->comms_data = sd;
         
         comm->request_ep_config(comm);
@@ -929,10 +1079,12 @@ void free_stdio_communication_functions(CommunicationFunctions *comm) {
     if (comm == NULL) return;
     StdioCommsData *sd = (StdioCommsData*)comm->comms_data;
     if (sd) {
-        close(sd->read_fd);
-        close(sd->write_fd);
-        kill(sd->pid, SIGTERM);
-        waitpid(sd->pid, NULL, 0);
+        sd->shutting_down = 1;
+        if (sd->read_fd >= 0) close(sd->read_fd);
+        if (sd->write_fd >= 0) close(sd->write_fd);
+        sd->read_fd = -1;
+        sd->write_fd = -1;
+        stdio_reap_child(sd, 1);
         free(sd);
     }
     if (comm->command) free(comm->command);
@@ -1177,10 +1329,12 @@ void free_stdio_communication_functions(CommunicationFunctions *comm) {
     if (comm == NULL) return;
     WinStdioCommsData *sd = (WinStdioCommsData*)comm->comms_data;
     if (sd) {
-        CloseHandle(sd->read_handle);
-        CloseHandle(sd->write_handle);
-        TerminateProcess(sd->process_handle, 0);
-        CloseHandle(sd->process_handle);
+        if (sd->read_handle) CloseHandle(sd->read_handle);
+        if (sd->write_handle) CloseHandle(sd->write_handle);
+        if (sd->process_handle) {
+            TerminateProcess(sd->process_handle, 0);
+            CloseHandle(sd->process_handle);
+        }
         free(sd);
     }
     if (comm->command) free(comm->command);

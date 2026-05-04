@@ -5,6 +5,7 @@
 
 #include "dslsyntax_common.h"
 #include "dslsyntax_log.h"
+#include "thread_utils.h"
 
 /* Common / Utility Functions */
 
@@ -682,11 +683,23 @@ void base_apply_transaction(CodeBuffer *cb, Transaction transaction) {
 
 /* Function to apply a single transaction */
 void editor_apply_transaction(CodeBuffer *cb, Transaction transaction) {
+    int locked = 0;
+
+    if (!cb) return;
+    if (parser_thread_utils_is_initialized()) {
+        if (enter_codeblock_critical_section() == 0) {
+            locked = 1;
+        } else {
+            LOG("editor_apply_transaction: failed to enter critical section");
+            return;
+        }
+    }
+
     // Add a transaction to the transaction list
     Transaction *new_transactions = (Transaction *)safe_realloc(cb->transactions, sizeof(Transaction) * (cb->transaction_count + 1));
     if (!new_transactions) {
         LOG("Failed to reallocate memory for transactions");
-        return;
+        goto done;
     }
     cb->transactions = new_transactions;
 
@@ -699,7 +712,7 @@ void editor_apply_transaction(CodeBuffer *cb, Transaction transaction) {
         cb->transactions[cb->transaction_count].content = strdup(transaction.content);
         if (!cb->transactions[cb->transaction_count].content) {
             LOG("Failed to allocate memory for Delta transaction content");
-            return;
+            goto done;
         }
     } else {
         cb->transactions[cb->transaction_count].content = NULL;
@@ -709,6 +722,9 @@ void editor_apply_transaction(CodeBuffer *cb, Transaction transaction) {
 
     // Apply the transaction
     base_apply_transaction(cb, transaction);
+
+done:
+    if (locked) exit_codeblock_critical_section();
 }
 
 /* Function to take a snapshot of the buffer */
@@ -1125,14 +1141,25 @@ char* get_code_buffer_source(CodeBuffer *cb) {
 #define MAX_STACK_CHARS 256
 
 void cb_sync_line(CodeBuffer *cb, int line_index, const char *new_text) {
-    if (!cb || line_index < 0 || line_index >= (int)cb->line_count) return;
+    int locked = 0;
+
+    if (!cb) return;
+    if (parser_thread_utils_is_initialized()) {
+        if (enter_codeblock_critical_section() == 0) {
+            locked = 1;
+        } else {
+            LOG("cb_sync_line: failed to enter critical section");
+            return;
+        }
+    }
+    if (line_index < 0 || line_index >= (int)cb->line_count) goto done;
 
     CodeBufferLine *line = &cb->lines[line_index];
     size_t old_len = line->length;
 
     char32_t stack_old_cp[MAX_STACK_CHARS];
     char32_t *old_cp = old_len <= MAX_STACK_CHARS ? stack_old_cp : malloc(old_len * sizeof(char32_t));
-    if (!old_cp) return;
+    if (!old_cp) goto done;
 
     for (size_t i = 0; i < old_len; i++) {
         old_cp[i] = line->characters[i].heap_character ? line->characters[i].heap_character[0] : line->characters[i].character[0];
@@ -1150,7 +1177,7 @@ void cb_sync_line(CodeBuffer *cb, int line_index, const char *new_text) {
     char32_t *new_cp = new_len <= MAX_STACK_CHARS ? stack_new_cp : malloc(new_len * sizeof(char32_t));
     if (!new_cp) {
         if (old_cp != stack_old_cp) free(old_cp);
-        return;
+        goto done;
     }
 
     temp = new_text ? new_text : "";
@@ -1201,4 +1228,7 @@ void cb_sync_line(CodeBuffer *cb, int line_index, const char *new_text) {
 
     if (old_cp != stack_old_cp) free(old_cp);
     if (new_cp != stack_new_cp) free(new_cp);
+
+done:
+    if (locked) exit_codeblock_critical_section();
 }

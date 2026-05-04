@@ -19,7 +19,7 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(cmark_gfm)
 
-add_library(markdown_highlighter markdown_parser.c markdown_parser.h)
+add_library(markdown_highlighter STATIC markdown_parser.c markdown_parser.h)
 target_include_directories(markdown_highlighter PRIVATE
         .
         ${cmark_gfm_SOURCE_DIR}/src
@@ -37,6 +37,7 @@ target_link_libraries(markdown_highlighter PRIVATE
 add_executable(mdp main.c)
 target_include_directories(mdp PRIVATE .)
 target_link_libraries(mdp PRIVATE markdown_highlighter DSLSH::parser)
+dslsh_set_install_rpath(mdp)
 
 if(DSLSH_BUILD_TESTS)
     add_executable(markdown_parser_test markdown_parser_test.c)
