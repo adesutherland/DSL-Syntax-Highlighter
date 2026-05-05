@@ -4,6 +4,7 @@ project(c_parser C)
 set(CMAKE_C_STANDARD 11)
 
 include(FetchContent)
+include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/DslshRpath.cmake")
 
 FetchContent_Declare(
         tree_sitter_c

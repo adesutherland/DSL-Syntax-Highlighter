@@ -30,13 +30,7 @@ option(DSLSH_BUILD_PYTHON "Build the bundled Python parser adapter" ${DSLSH_BUIL
 option(DSLSH_BUILD_JAVASCRIPT "Build the bundled JavaScript parser adapter" ${DSLSH_BUILD_PARSERS})
 option(DSLSH_INSTALL "Install DSLSH build products" ${DSLSH_DEFAULT_FULL_BUILD})
 
-function(dslsh_set_install_rpath target)
-  if(APPLE)
-    set_target_properties(${target} PROPERTIES INSTALL_RPATH "@loader_path/../lib")
-  elseif(UNIX)
-    set_target_properties(${target} PROPERTIES INSTALL_RPATH "$ORIGIN/../lib")
-  endif()
-endfunction()
+include(cmake/DslshRpath.cmake)
 
 if((DSLSH_BUILD_TOOLS OR DSLSH_BUILD_EXAMPLES OR DSLSH_BUILD_PARSERS OR DSLSH_BUILD_TESTS)
     AND NOT DSLSH_BUILD_CORE)

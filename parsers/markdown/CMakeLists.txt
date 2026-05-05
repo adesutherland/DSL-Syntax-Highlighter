@@ -4,6 +4,7 @@ project(markdown_parser C)
 set(CMAKE_C_STANDARD 11)
 
 include(FetchContent)
+include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/DslshRpath.cmake")
 
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "" FORCE)
 set(CMARK_TESTS OFF CACHE BOOL "" FORCE)

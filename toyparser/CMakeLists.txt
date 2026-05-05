@@ -3,6 +3,8 @@ project(toyparser C)
 
 set(CMAKE_C_STANDARD 11)
 
+include("${CMAKE_CURRENT_LIST_DIR}/../cmake/DslshRpath.cmake")
+
 # Build the highlighter library
 add_library(highlighter STATIC parser.c parser_hightlighter.c)
 # Include codebuffer in the include directories

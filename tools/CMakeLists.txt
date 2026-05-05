@@ -1,3 +1,5 @@
+include("${CMAKE_CURRENT_LIST_DIR}/../cmake/DslshRpath.cmake")
+
 add_executable(parser_tester parser_tester.c)
 add_executable(DSLSH::parser_tester ALIAS parser_tester)
 target_link_libraries(parser_tester PRIVATE DSLSH::editor)
