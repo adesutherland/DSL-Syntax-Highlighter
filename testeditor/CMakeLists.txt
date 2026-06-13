@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.29)
+cmake_minimum_required(VERSION 3.14)
 project(testeditor C)
 
 set(CMAKE_C_STANDARD 11)
@@ -7,7 +7,7 @@ include("${CMAKE_CURRENT_LIST_DIR}/../cmake/DslshRpath.cmake")
 
 add_executable(te editor.c)
 target_include_directories(te PRIVATE "${DSL_Syntax_Highlighter_SOURCE_DIR}/toyparser")
-target_link_libraries(te PRIVATE DSLSH::editor DSLSH::parser highlighter)
+target_link_libraries(te PRIVATE DSLSH::editor highlighter)
 dslsh_set_install_rpath(te)
 
 if(WIN32)

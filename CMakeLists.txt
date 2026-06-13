@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.29)
+cmake_minimum_required(VERSION 3.14)
 project(DSL_Syntax_Highlighter LANGUAGES C)
 
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
@@ -13,7 +13,7 @@ endif()
 include(CTest)
 #set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=memory -fPIE -pie -fno-omit-frame-pointer -g -fno-optimize-sibling-calls -O1")
 
-if(PROJECT_IS_TOP_LEVEL)
+if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
   set(DSLSH_DEFAULT_FULL_BUILD ON)
 else()
   set(DSLSH_DEFAULT_FULL_BUILD OFF)

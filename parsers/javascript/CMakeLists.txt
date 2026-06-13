@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.29)
+cmake_minimum_required(VERSION 3.14)
 project(javascript_parser C)
 
 set(CMAKE_C_STANDARD 11)
@@ -28,20 +28,22 @@ if(EXISTS "${tree_sitter_javascript_SOURCE_DIR}/src/scanner.c")
 endif()
 
 add_library(javascript_highlighter STATIC javascript_parser.c javascript_parser.h)
-target_include_directories(javascript_highlighter PRIVATE .)
-target_link_libraries(javascript_highlighter PRIVATE
+target_include_directories(javascript_highlighter PUBLIC .)
+target_link_libraries(javascript_highlighter
+    PUBLIC
         DSLSH::tree_sitter_common
+    PRIVATE
         dslsh_tree_sitter_javascript_grammar)
 
 add_executable(jsp main.c)
 target_include_directories(jsp PRIVATE .)
-target_link_libraries(jsp PRIVATE javascript_highlighter DSLSH::parser)
+target_link_libraries(jsp PRIVATE javascript_highlighter)
 dslsh_set_install_rpath(jsp)
 
 if(DSLSH_BUILD_TESTS)
     add_executable(javascript_parser_test javascript_parser_test.c)
     target_include_directories(javascript_parser_test PRIVATE .)
-    target_link_libraries(javascript_parser_test PRIVATE javascript_highlighter DSLSH::parser)
+    target_link_libraries(javascript_parser_test PRIVATE javascript_highlighter)
     add_test(NAME javascript_parser_test COMMAND javascript_parser_test)
 
     add_executable(javascript_shutdown_test javascript_shutdown_test.c)

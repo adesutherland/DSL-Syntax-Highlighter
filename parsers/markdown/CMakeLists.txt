@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.29)
+cmake_minimum_required(VERSION 3.14)
 project(markdown_parser C)
 
 set(CMAKE_C_STANDARD 11)
@@ -21,8 +21,10 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(cmark_gfm)
 
 add_library(markdown_highlighter STATIC markdown_parser.c markdown_parser.h)
-target_include_directories(markdown_highlighter PRIVATE
+target_include_directories(markdown_highlighter
+    PUBLIC
         .
+    PRIVATE
         ${cmark_gfm_SOURCE_DIR}/src
         ${cmark_gfm_BINARY_DIR}/src
         ${cmark_gfm_SOURCE_DIR}/extensions
@@ -30,20 +32,22 @@ target_include_directories(markdown_highlighter PRIVATE
 target_compile_definitions(markdown_highlighter PRIVATE
         CMARK_GFM_STATIC_DEFINE
         CMARK_GFM_EXTENSIONS_STATIC_DEFINE)
-target_link_libraries(markdown_highlighter PRIVATE
+target_link_libraries(markdown_highlighter
+    PUBLIC
         DSLSH::parser
+    PRIVATE
         libcmark-gfm_static
         libcmark-gfm-extensions_static)
 
 add_executable(mdp main.c)
 target_include_directories(mdp PRIVATE .)
-target_link_libraries(mdp PRIVATE markdown_highlighter DSLSH::parser)
+target_link_libraries(mdp PRIVATE markdown_highlighter)
 dslsh_set_install_rpath(mdp)
 
 if(DSLSH_BUILD_TESTS)
     add_executable(markdown_parser_test markdown_parser_test.c)
     target_include_directories(markdown_parser_test PRIVATE .)
-    target_link_libraries(markdown_parser_test PRIVATE markdown_highlighter DSLSH::parser)
+    target_link_libraries(markdown_parser_test PRIVATE markdown_highlighter)
     add_test(NAME markdown_parser_test COMMAND markdown_parser_test)
 endif()
 

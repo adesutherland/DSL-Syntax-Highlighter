@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.29)
+cmake_minimum_required(VERSION 3.14)
 project(python_parser C)
 
 set(CMAKE_C_STANDARD 11)
@@ -29,20 +29,22 @@ if(EXISTS "${tree_sitter_python_SOURCE_DIR}/src/scanner.c")
 endif()
 
 add_library(python_highlighter STATIC python_parser.c python_parser.h)
-target_include_directories(python_highlighter PRIVATE .)
-target_link_libraries(python_highlighter PRIVATE
+target_include_directories(python_highlighter PUBLIC .)
+target_link_libraries(python_highlighter
+    PUBLIC
         DSLSH::tree_sitter_common
+    PRIVATE
         dslsh_tree_sitter_python_grammar)
 
 add_executable(pyp main.c)
 target_include_directories(pyp PRIVATE .)
-target_link_libraries(pyp PRIVATE python_highlighter DSLSH::parser)
+target_link_libraries(pyp PRIVATE python_highlighter)
 dslsh_set_install_rpath(pyp)
 
 if(DSLSH_BUILD_TESTS)
     add_executable(python_parser_test python_parser_test.c)
     target_include_directories(python_parser_test PRIVATE .)
-    target_link_libraries(python_parser_test PRIVATE python_highlighter DSLSH::parser)
+    target_link_libraries(python_parser_test PRIVATE python_highlighter)
     add_test(NAME python_parser_test COMMAND python_parser_test)
 endif()
 

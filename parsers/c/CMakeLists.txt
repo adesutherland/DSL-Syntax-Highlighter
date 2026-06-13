@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.29)
+cmake_minimum_required(VERSION 3.14)
 project(c_parser C)
 
 set(CMAKE_C_STANDARD 11)
@@ -28,20 +28,22 @@ if(EXISTS "${tree_sitter_c_SOURCE_DIR}/src/scanner.c")
 endif()
 
 add_library(c_highlighter STATIC c_parser.c c_parser.h)
-target_include_directories(c_highlighter PRIVATE .)
-target_link_libraries(c_highlighter PRIVATE
+target_include_directories(c_highlighter PUBLIC .)
+target_link_libraries(c_highlighter
+    PUBLIC
         DSLSH::tree_sitter_common
+    PRIVATE
         dslsh_tree_sitter_c_grammar)
 
 add_executable(dslsh-c main.c)
 target_include_directories(dslsh-c PRIVATE .)
-target_link_libraries(dslsh-c PRIVATE c_highlighter DSLSH::parser)
+target_link_libraries(dslsh-c PRIVATE c_highlighter)
 dslsh_set_install_rpath(dslsh-c)
 
 if(DSLSH_BUILD_TESTS)
     add_executable(c_parser_test c_parser_test.c)
     target_include_directories(c_parser_test PRIVATE .)
-    target_link_libraries(c_parser_test PRIVATE c_highlighter DSLSH::parser)
+    target_link_libraries(c_parser_test PRIVATE c_highlighter)
     add_test(NAME c_parser_test COMMAND c_parser_test)
 endif()
 
