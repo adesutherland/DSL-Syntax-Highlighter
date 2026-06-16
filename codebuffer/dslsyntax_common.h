@@ -433,6 +433,9 @@ CommunicationFunctions* create_stdio_communication_functions(const char *command
 // Free the inproc communication functions
 void free_inproc_communication_functions(CommunicationFunctions *comm);
 
+// Free the socket communication functions
+void free_socket_communication_functions(CommunicationFunctions *comm);
+
 // Free the stdio communication functions
 void free_stdio_communication_functions(CommunicationFunctions *comm);
 

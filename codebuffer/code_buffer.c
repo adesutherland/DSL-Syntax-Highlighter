@@ -380,6 +380,7 @@ CodeBuffer* create_code_buffer(CommunicationFunctions *comm, ParserFunction pars
     cb->async_parse_active = 0;
     cb->parse_complete_pending = 0;
     cb->snapshot_number = 0;
+    cb->snapshot_line_count = 0;
     cb->snapshot_lines = NULL;
     cb->lines = NULL;
     cb->line_count = 0;
@@ -926,6 +927,10 @@ void free_code_buffer(CodeBuffer *cb) {
     // Free parse_tree
     if (cb->parse_tree) cb_free_token_buffer(cb->parse_tree);
     cb->parse_tree = NULL;
+
+    // Free emergency parsing rules learned or seeded for this buffer
+    if (cb->ep_rules) cb_free_ep_rules(cb->ep_rules);
+    cb->ep_rules = NULL;
 
     // Free snapshot lines
     if (cb->snapshot_lines) {

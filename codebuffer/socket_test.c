@@ -132,21 +132,24 @@ int test_socket_communication() {
 
     /* 1. Test Initial Load */
     printf("Client: Sending Initial Load...\n");
-    InitialLoad load;
-    load.unique_document_id = strdup("test_doc");
-    load.change_version = 1;
-    load.line_count = 2;
-    load.lines = (CodeBufferLine*)malloc(2 * sizeof(CodeBufferLine));
-    utf8_to_line("Line 1", &load.lines[0]);
-    utf8_to_line("Line 2", &load.lines[1]);
+    InitialLoad *load = (InitialLoad*)malloc(sizeof(InitialLoad));
+    assert(load != NULL);
+    load->unique_document_id = strdup("test_doc");
+    load->change_version = 1;
+    load->line_count = 2;
+    load->lines = (CodeBufferLine*)malloc(2 * sizeof(CodeBufferLine));
+    assert(load->unique_document_id != NULL);
+    assert(load->lines != NULL);
+    utf8_to_line("Line 1", &load->lines[0]);
+    utf8_to_line("Line 2", &load->lines[1]);
 
-    CB_ParseTree *tb = comm->send_initial_load(comm, &load);
+    CB_ParseTree *tb = comm->send_initial_load(comm, load);
+    free_initial_load(load);
     if (tb) {
         printf("Client: Initial Load Result received. Tree root type: %d\n", tb->root->type);
     } else {
         printf("Client: Initial Load failed.\n");
-        free(comm->comms_data);
-        free(comm);
+        free_socket_communication_functions(comm);
         destroy_thread_utils();
         return 1;
     }
@@ -170,14 +173,15 @@ int test_socket_communication() {
 
         CB_ParseTree *tb2 = comm->send_delta(comm, &delta);
         free(delta.unique_document_id);
+        free(delta.transactions[0].content);
+        free(delta.transactions);
         if (tb2) {
             printf("Client: Delta Result received.\n");
             cb_free_token_buffer(tb2);
         } else {
             printf("Client: Delta send failed.\n");
             if (tb) cb_free_token_buffer(tb);
-            free(comm->comms_data);
-            free(comm);
+            free_socket_communication_functions(comm);
             destroy_thread_utils();
             return 1;
         }
@@ -185,8 +189,7 @@ int test_socket_communication() {
 
     /* Cleanup client */
     if (tb) cb_free_token_buffer(tb);
-    free(comm->comms_data);
-    free(comm);
+    free_socket_communication_functions(comm);
     
     printf("Socket communication test successful!\n");
     

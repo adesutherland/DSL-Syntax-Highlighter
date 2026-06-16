@@ -36,8 +36,8 @@ target_link_libraries(markdown_highlighter
     PUBLIC
         DSLSH::parser
     PRIVATE
-        libcmark-gfm_static
-        libcmark-gfm-extensions_static)
+        libcmark-gfm-extensions_static
+        libcmark-gfm_static)
 
 add_executable(mdp main.c)
 target_include_directories(mdp PRIVATE .)

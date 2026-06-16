@@ -18,6 +18,7 @@
 #endif
 #endif
 #include "dslsyntax_common.h"
+#include "dslsyntax_editor.h"
 #include "serialization.h"
 
 #ifndef _WIN32
@@ -41,14 +42,10 @@ static void test_stdio_quoted_parser_path(const char *parser_cmd) {
     CommunicationFunctions *comm = create_stdio_communication_functions(quoted_cmd);
     assert(comm != NULL);
 
-    InitialLoad load;
-    load.unique_document_id = strdup("quoted_test_doc");
-    load.change_version = 1;
-    load.line_count = 1;
-    load.lines = (CodeBufferLine*)malloc(sizeof(CodeBufferLine));
-    utf8_to_line("say quoted", &load.lines[0]);
+    InitialLoad *load = create_initial_load("quoted_test_doc", "say quoted");
 
-    CB_ParseTree *tb = comm->send_initial_load(comm, &load);
+    CB_ParseTree *tb = comm->send_initial_load(comm, load);
+    free_initial_load(load);
     assert(tb != NULL);
     assert(tb->root != NULL);
 
@@ -108,15 +105,10 @@ void test_stdio_communication() {
 
     /* 1. Test Initial Load */
     printf("Client: Sending Initial Load...\n");
-    InitialLoad load;
-    load.unique_document_id = strdup("test_doc");
-    load.change_version = 1;
-    load.line_count = 2;
-    load.lines = (CodeBufferLine*)malloc(2 * sizeof(CodeBufferLine));
-    utf8_to_line("Line 1", &load.lines[0]);
-    utf8_to_line("Line 2", &load.lines[1]);
+    InitialLoad *load = create_initial_load("test_doc", "Line 1\nLine 2");
 
-    CB_ParseTree *tb = comm->send_initial_load(comm, &load);
+    CB_ParseTree *tb = comm->send_initial_load(comm, load);
+    free_initial_load(load);
     if (tb) {
         printf("Client: Initial Load Result received. Tree root type: %d\n", tb->root->type);
     } else {
@@ -172,6 +164,8 @@ void test_stdio_communication() {
 
         CB_ParseTree *tb2 = comm->send_delta(comm, &delta);
         free(delta.unique_document_id);
+        free(delta.transactions[0].content);
+        free(delta.transactions);
         if (tb2) {
             printf("Client: Delta Result received. Root length: %zu\n", tb2->root->length);
             cb_free_token_buffer(tb2);

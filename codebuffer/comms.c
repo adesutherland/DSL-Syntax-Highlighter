@@ -543,6 +543,17 @@ CommunicationFunctions* create_socket_communication_functions(const char *addres
     return comm;
 }
 
+void free_socket_communication_functions(CommunicationFunctions *comm) {
+    if (comm == NULL) return;
+    SocketCommsData *sd = (SocketCommsData*)comm->comms_data;
+    if (sd) {
+        if (sd->address) free(sd->address);
+        free(sd);
+    }
+    if (comm->command) free(comm->command);
+    free(comm);
+}
+
 /* --- Socket Server --- */
 
 void cb_start_server(CodeBuffer *parser_cb, const char *address, int port) {
@@ -1080,11 +1091,11 @@ void free_stdio_communication_functions(CommunicationFunctions *comm) {
     StdioCommsData *sd = (StdioCommsData*)comm->comms_data;
     if (sd) {
         sd->shutting_down = 1;
-        if (sd->read_fd >= 0) close(sd->read_fd);
         if (sd->write_fd >= 0) close(sd->write_fd);
-        sd->read_fd = -1;
         sd->write_fd = -1;
-        stdio_reap_child(sd, 1);
+        stdio_reap_child(sd, 0);
+        if (sd->read_fd >= 0) close(sd->read_fd);
+        sd->read_fd = -1;
         free(sd);
     }
     if (comm->command) free(comm->command);

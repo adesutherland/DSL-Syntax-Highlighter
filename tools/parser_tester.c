@@ -115,6 +115,7 @@ static int wait_for_parser(CodeBuffer *cb) {
         if (time(NULL) - start_time > 10) {
             if (g_verbose) printf("Error: Parser timed out after 10 seconds. Killing process...\n");
             cb_kill_parser_process(cb);
+            editor_wait_for_parser_threads();
             return 0; // Timeout
         }
 #ifdef _WIN32
@@ -124,6 +125,26 @@ static int wait_for_parser(CodeBuffer *cb) {
 #endif
     }
     return 1; // Success
+}
+
+static void destroy_parser_buffer(CodeBuffer **cb_ptr) {
+    CodeBuffer *old_cb;
+    CommunicationFunctions *comm;
+
+    if (!cb_ptr || !*cb_ptr) return;
+
+    old_cb = *cb_ptr;
+    comm = old_cb->communication_functions;
+
+    if (old_cb->async_parse_active || editor_is_parsing_thread_active()) {
+        cb_kill_parser_process(old_cb);
+        editor_wait_for_parser_threads();
+    }
+
+    old_cb->communication_functions = NULL;
+    free_code_buffer(old_cb);
+    if (comm) free_stdio_communication_functions(comm);
+    *cb_ptr = NULL;
 }
 
 static void print_help() {
@@ -277,7 +298,7 @@ int main(int argc, char **argv) {
                 printf("INIT command: %s\n", parser_cmd);
                 printf("INIT source : %s\n", source_file);
             }
-            if (cb) free_code_buffer(cb);
+            destroy_parser_buffer(&cb);
             
             char full_cmd[2048];
             snprintf(full_cmd, sizeof(full_cmd), "%s -d --syntaxhighlight", parser_cmd);
@@ -289,11 +310,17 @@ int main(int argc, char **argv) {
             }
             
             cb = create_code_buffer(comm, NULL);
+            if (!cb) {
+                fprintf(stderr, "Failed to create code buffer\n");
+                free_stdio_communication_functions(comm);
+                continue;
+            }
             cb_set_auto_relaunch(cb, 0); 
 
             char *content = load_source_normalized(source_file);
             if (!content) {
                 fprintf(stderr, "Failed to open %s\n", source_file);
+                destroy_parser_buffer(&cb);
                 continue;
             }
 
@@ -416,7 +443,7 @@ int main(int argc, char **argv) {
         }
     }
     
-    if (cb) free_code_buffer(cb);
+    destroy_parser_buffer(&cb);
     if (input != stdin) fclose(input);
 
     if (golden_file_opt && accumulated_out) {
