@@ -998,9 +998,10 @@ static void print_node(CB_Node *node, size_t depth, void *user_data) {
         size_t line = 0, column = 0;
         if (cb) get_code_buffer_part(cb, node->pos, node->length, &line, &column, &value);
         if (value) escaped = escape_string(value);
+        const char *escaped_text = escaped ? escaped : "";
 
         printf("> %s, Pos: %d (%d, %d), Length: %d \"%s\"\n", cb_token_type_to_string(node->type), (int)node->pos,
-               (int)line, (int)column, (int)node->length, escaped);
+               (int)line, (int)column, (int)node->length, escaped_text);
         if (value) free(value);
         if (escaped) free(escaped);
     }

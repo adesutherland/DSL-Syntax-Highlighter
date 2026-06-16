@@ -46,8 +46,9 @@ tools/asan-run.sh --kill cmake-build-asan/asan-logs/latest
 
 ## Leak Policy
 
-Build commands default to `ASAN_OPTIONS=detect_leaks=0`. CTest phases use leak
-detection by default for `--phase full` and `--phase focused-lsan`.
+Build commands and CTest phases use leak detection by default for `--phase full`
+and `--phase focused-lsan`. Use `--build-leaks off` or `--leaks off` only for
+short-lived diagnostics when isolating a non-leak sanitizer failure.
 
 Focused leak triage is serialized and runs:
 
@@ -62,3 +63,12 @@ LeakSanitizer cannot run while the process is being traced. If every ASan test
 fails immediately with `LeakSanitizer does not work under ptrace`, rerun the
 same runner command outside the traced environment rather than disabling leak
 detection.
+
+## Validation Log
+
+2026-06-16:
+
+* Normal Debug CTest passed: 12 tests passed and `socket_test` skipped, log
+  `/tmp/dslsh-debug-ctest.F79C5T.log`.
+* Focused ASan/LSan passed with build and test leak detection enabled, log
+  directory `cmake-build-asan/asan-logs/20260616-172720-focused-lsan`.

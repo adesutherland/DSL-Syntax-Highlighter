@@ -9,7 +9,7 @@ test_jobs=4
 test_jobs_set=0
 build_targets=()
 phase="full"
-build_leaks="off"
+build_leaks="on"
 test_leaks="off"
 test_leaks_set=0
 regex=""
@@ -41,7 +41,7 @@ Options:
   --build-target TARGET  Build only this target in --phase build. Repeatable.
   --test-jobs N          CTest parallelism. Default: 4, except focused-lsan defaults to 1.
   --leaks on|off         Set test-phase leak detection. focused-lsan defaults to on.
-  --build-leaks on|off   Set build-phase leak detection. Default: off.
+  --build-leaks on|off   Set build-phase leak detection. Default: on.
   --regex REGEX          CTest -R regex. focused-lsan has a built-in default.
   --exclude-regex REGEX  CTest -E regex.
   --ctest-index SPEC     Pass a CTest -I range, e.g. '5,,'.
