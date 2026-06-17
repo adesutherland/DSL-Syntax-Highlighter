@@ -28,16 +28,26 @@ static void test_stdio_quoted_parser_path(const char *parser_cmd) {
     char linked_path[PATH_MAX];
     char quoted_cmd[PATH_MAX * 2];
     const char *tmpdir = getenv("TMPDIR");
+    char *created_dir;
+    char *resolved_path;
+    int written;
+    int symlink_rc;
 
     printf("Testing quoted parser command path...\n");
 
     if (!tmpdir) tmpdir = "/tmp";
-    assert(snprintf(dir_template, sizeof(dir_template), "%s/dslsh parser test.XXXXXX", tmpdir) < (int)sizeof(dir_template));
-    assert(mkdtemp(dir_template) != NULL);
-    assert(realpath(parser_cmd, parser_path) != NULL);
-    assert(snprintf(linked_path, sizeof(linked_path), "%s/tp with spaces", dir_template) < (int)sizeof(linked_path));
-    assert(symlink(parser_path, linked_path) == 0);
-    assert(snprintf(quoted_cmd, sizeof(quoted_cmd), "\"%s\" -d", linked_path) < (int)sizeof(quoted_cmd));
+    written = snprintf(dir_template, sizeof(dir_template), "%s/dslsh parser test.XXXXXX", tmpdir);
+    assert(written >= 0 && written < (int)sizeof(dir_template));
+    created_dir = mkdtemp(dir_template);
+    assert(created_dir != NULL);
+    resolved_path = realpath(parser_cmd, parser_path);
+    assert(resolved_path != NULL);
+    written = snprintf(linked_path, sizeof(linked_path), "%s/tp with spaces", dir_template);
+    assert(written >= 0 && written < (int)sizeof(linked_path));
+    symlink_rc = symlink(parser_path, linked_path);
+    assert(symlink_rc == 0);
+    written = snprintf(quoted_cmd, sizeof(quoted_cmd), "\"%s\" -d", linked_path);
+    assert(written >= 0 && written < (int)sizeof(quoted_cmd));
 
     CommunicationFunctions *comm = create_stdio_communication_functions(quoted_cmd);
     assert(comm != NULL);

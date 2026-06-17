@@ -91,3 +91,7 @@ runner itself is broken.
   not leak into the core `codebuffer/` library.
 - **Thread Safety**: All access to the shared `CodeBuffer` in the editor must be
   wrapped in `enter_codeblock_critical_section()`.
+- **Release-safe tests**: Test setup must not rely on side effects inside
+  `assert()`. Release builds may define `NDEBUG`, so calls such as `snprintf()`,
+  `mkdtemp()`, `realpath()`, `symlink()`, or parser launch setup must execute
+  before assertions check their results.

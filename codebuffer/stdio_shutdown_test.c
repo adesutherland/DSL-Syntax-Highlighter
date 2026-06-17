@@ -51,6 +51,7 @@ static const char *find_toy_parser(void) {
 int main(void) {
     const char *parser_path = find_toy_parser();
     char parser_cmd[1024];
+    int written;
     CommunicationFunctions *comm;
     CodeBuffer *cb;
     InitialLoad *initial;
@@ -60,7 +61,8 @@ int main(void) {
         return 0;
     }
 
-    assert(snprintf(parser_cmd, sizeof(parser_cmd), "%s -s --syntaxhighlight", parser_path) < (int)sizeof(parser_cmd));
+    written = snprintf(parser_cmd, sizeof(parser_cmd), "%s -s --syntaxhighlight", parser_path);
+    assert(written >= 0 && written < (int)sizeof(parser_cmd));
 
     editor_init();
     comm = create_stdio_communication_functions(parser_cmd);
