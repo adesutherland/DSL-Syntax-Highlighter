@@ -591,7 +591,7 @@ static void print_help(const char *prog) {
     printf("  -h, --help    Show this help\n\n");
     printf("Example:\n");
     printf("  %s \"./toyparser/tp -d\" test.toy\n", prog);
-    printf("  %s -d \"./bin/rxas --parser\" test.rxas\n", prog);
+    printf("  %s -d \"rxc --syntaxhighlight\" test.rx\n", prog);
 }
 
 int main(int argc, char *argv[]) {

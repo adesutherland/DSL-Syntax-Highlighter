@@ -23,7 +23,7 @@ int main(int argc, char *argv[]) {
             stdio_mode = 1;
         }
         else if (strcmp(argv[i], "--syntaxhighlight") == 0) {
-            // Ignore, compatibility with rxas
+            /* Ignore, compatibility with CREXX parser test scripts. */
         }
         else {
             port = atoi(argv[i]);

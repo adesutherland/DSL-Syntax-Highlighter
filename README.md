@@ -55,6 +55,20 @@ Parser adapters under `parsers/` are optional. Their third-party dependencies
 must stay behind `DSLSH_BUILD_PARSERS` and parser-specific options, so editor
 and compiler consumers do not inherit those dependencies.
 
+### CREXX Integration Note
+
+DSLSH does not embed CREXX bytecode and does not call the RXVML dynamic lookup
+APIs directly. With current CREXX builds that use signature-based callable
+lookup, downstream CREXX/THE integrations should rebuild `.rxbin` files for
+bytecode format `006`, refresh native caches for `RXVML_ABI_VERSION` 8 and
+`CREXXSAA_ABI_VERSION` 3, and launch syntax highlighting with
+`rxc --syntaxhighlight`.
+
+Native parser hosts that embed CREXX should use the descriptor entry points
+(`rxvml_call_procedure_descriptor`, `rxvml_call_factory_descriptor`, and
+`rxvml_call_method_descriptor`). Handwritten RXAS should use `srcmethodsel` and
+`srcfprocsel` for selected dynamic lookup.
+
 Bundled parser adapters can also be controlled individually:
 
 ```bash

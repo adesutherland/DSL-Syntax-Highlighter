@@ -35,7 +35,20 @@ The REPL understands the following plain-text commands (one per line):
 Initializes the tester. It launches the parser server specified by `<parser_cmd>`, loads the contents of `<source_file>`, and sends an `InitialLoad` payload.
 * **Note**: `parser_tester` automatically disables the production "auto-relaunch" behavior. If your parser crashes during testing, the status will immediately reflect the crash rather than hiding it behind silent restarts.
 * **Example**: `INIT ./cmake-build-debug/toyparser/tp test.toy`
-* **Example with args**: `INIT "./cmake-build-debug/bin/rxas -d --parser" test.rxas`
+* **Example with args**: `INIT "rxc --syntaxhighlight" test.rx`
+
+### CREXX compatibility
+
+Current CREXX syntax highlighting is exposed by `rxc --syntaxhighlight`.
+`rxas` is still relevant for handwritten assembler sources, but the installed
+assembler is not the DSLSH parser server entry point.
+
+CREXX bytecode and native-host integrations are format/ABI sensitive. After the
+signature-based dynamic lookup change, rebuild all `.rxbin` files for bytecode
+format `006`, refresh native caches for `RXVML_ABI_VERSION` 8 and
+`CREXXSAA_ABI_VERSION` 3, and use descriptor-based VM entry points in native
+hosts. Handwritten RXAS should use `srcmethodsel` and `srcfprocsel` instead of
+the old name-only dynamic lookup opcodes.
 
 ### `INSERT <line> <col> <text...>`
 Simulates the user typing text into the buffer at the specified 0-based line and column index. It immediately triggers a delta update to the parser.
@@ -61,7 +74,9 @@ Exits the test harness cleanly.
 
 ## Recommended Test Suite for a New Parser
 
-When developing a new parser integration (e.g., `rxas`, `rxc`), you should execute the following test scenarios using `parser_tester`:
+When developing a new parser integration (e.g., `rxc --syntaxhighlight` or
+another CREXX adapter), you should execute the following test scenarios using
+`parser_tester`:
 
 1. **Initial Load Test**:
    * **Action**: `INIT` a large, complex file. `STATUS`. `DUMP_AST`.
@@ -85,9 +100,10 @@ When developing a new parser integration (e.g., `rxas`, `rxc`), you should execu
 
 ## Lessons Learned & Future Improvements
 
-During the development of `parser_tester` and testing against `toyparser` and `rxas`, several key lessons were learned:
+During the development of `parser_tester` and testing against `toyparser` and
+CREXX parser adapters, several key lessons were learned:
 
 1. **Beware Double Parses & Tree Flattening**: We discovered a critical bug where `base_load_initial_content` was internally triggering a parse, and the server loop was accidentally triggering a second parse. In `rxas`, this resulted in a double-free memory corruption because the assembler's cleanup routine (`rxasclrc`) wasn't perfectly idempotent. `parser_tester` exposes these lifecycle bugs instantly.
-2. **Argument Parsing Collisions**: When `parser_tester` attempted to pass `--parser` to `toyparser` (which was intended for `rxas`), `toyparser` misinterpreted the string as a port number (evaluating to port `0`). This caused `toyparser` to silently become a socket server while the editor waited indefinitely on `STDIN`. **Lesson**: Always ensure the `INIT` command's `parser_cmd` is quoted and strictly matches what the target parser expects.
+2. **Argument Parsing Collisions**: When `parser_tester` accidentally passed a parser-specific flag to `toyparser` (historically `--parser` from an early `rxas` adapter script), `toyparser` misinterpreted the string as a port number (evaluating to port `0`). This caused `toyparser` to silently become a socket server while the editor waited indefinitely on `STDIN`. **Lesson**: Always ensure the `INIT` command's `parser_cmd` is quoted and strictly matches what the target parser expects.
 3. **Timeouts are Critical**: Originally, the test harness would block forever if the parser silently died without closing `STDOUT` or if it went into an infinite loop. We added a 10-second timeout to `wait_for_parser()`. If the parser fails to return an AST within 10 seconds, `parser_tester` explicitly invokes `cb_kill_parser_process(cb)`, instantly terminating the parser process with `SIGKILL` (or `TerminateProcess` on Windows) and shutting down the pipes. This completely prevents the test harness from hanging and returns `STATUS: SUSPENDED`.
 4. **Re-launching vs Strict Mode**: While production editors (like THE) use an auto-relaunch policy (up to 3 crashes), a test harness *must* fail loudly. We introduced `cb_set_auto_relaunch(cb, 0)` specifically for `parser_tester` so that developers are immediately aware of Segfaults during development.
