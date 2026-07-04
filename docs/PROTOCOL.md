@@ -18,6 +18,9 @@ Alternative transport for remote parsers or persistent servers.
 ## 2. Message Format
 Messages are text-based, using `|` as a field separator. For robustness, string content (source code, error messages) is **hex-encoded**.
 
+### 2.0 Position Model
+All serialized protocol positions, columns, and lengths are zero-based Unicode codepoint offsets in the logical source buffer. They are not UTF-8 byte offsets, grapheme clusters, or rendered screen-cell columns. Parsers may remain UTF-8 byte oriented internally; DSLSH provides byte-span conversion helpers for parser adapters before token streams are stored or serialized. Editors own any later conversion from codepoint offsets to display widths and cursor cells.
+
 ### 2.1 Editor -> Parser (Requests)
 Requests are prefixed with a type marker:
 - **`I|` (Initial Load)**: Sent when a document is first opened.
@@ -29,11 +32,12 @@ Requests are prefixed with a type marker:
   - Format: `H|2|hex_doc_id|base_version|hypothesis_version|hex_overlay_id|transaction_count|type|line|col|count|hex_content|...`
   - The parser applies the transactions to a scratch copy and returns a token stream without changing the committed document mirror.
   - Editors should discard hypothesis responses whose `base_version` no longer matches the real buffer.
-  - Transaction Types: `a` (Add Chars), `d` (Delete Chars), `L` (Add Line), `l` (Delete Line), `J` (Join Lines), `S` (Split Line).
+  - Transaction Types: `a` (Add Codepoints), `d` (Delete Codepoints), `L` (Add Line), `l` (Delete Line), `J` (Join Lines), `S` (Split Line).
 
 ### 2.2 Parser -> Editor (Response)
 The response is always a serialized **Token Stream** representing the updated parse tree.
 - Format: `token_count|type|pos|len|identifier_id|severity|hex_msg_code|hex_msg|...`
+- `pos` and `len` are codepoint offsets/counts using the position model above.
 
 ## 3. Token Types
 Tokens are used for both lexical highlighting and structural markers.
@@ -42,12 +46,25 @@ Tokens are used for both lexical highlighting and structural markers.
 - `33`: `LEXER_WHITESPACE`
 - `34`: `LEXER_EOF`
 - `35`: `LEXER_TOKEN` (Generic)
-- `37`: `LEXER_COMMENT`
-- `38`: `LEXER_STRING_LITERAL`
-- `39`: `LEXER_NUMBER_LITERAL`
-- `40`: `LEXER_KEYWORD`
-- `41`: `LEXER_OPERATOR`
-- `53`: `LEXER_IDENTIFIER`
+- `36`: `LEXER_UNKNOWN`
+- `37`: `LEXER_PREPROCESSOR`
+- `38`: `LEXER_COMMENT`
+- `39`: `LEXER_STRING_LITERAL`
+- `40`: `LEXER_NUMBER_LITERAL`
+- `41`: `LEXER_KEYWORD`
+- `42`: `LEXER_OPERATOR`
+- `43`: `LEXER_OPERATOR_ASSIGN`
+- `44`: `LEXER_OPERATOR_ARITHMETIC`
+- `45`: `LEXER_OPERATOR_LOGICAL`
+- `46`: `LEXER_SEPARATOR`
+- `47`: `LEXER_STATEMENT_SEPARATOR`
+- `54`: `LEXER_IDENTIFIER`
+- `55`: `LEXER_TYPE_IDENTIFIER`
+- `56`: `LEXER_FUNCTION_IDENTIFIER`
+- `57`: `LEXER_CONSTANT_IDENTIFIER`
+- `58`: `LEXER_MACRO_IDENTIFIER`
+- `59`: `LEXER_MACRO_VARIABLE`
+- `60`: `LEXER_MACRO_CONSTANT`
 
 ### 3.2 Structural Tokens (Control)
 - `100`: `TREE_DOWN` - Enter a child scope.

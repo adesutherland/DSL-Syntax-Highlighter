@@ -35,6 +35,10 @@ When transactions occur, the modified line is scanned using the active `EP_Rules
 - **Comments**: It detects line-comment prefixes (e.g., `//`, `#`) and block-comment prefixes (`/*`, `<!--`). Because EP is line-based for performance, a block comment start will simply highlight the remainder of that specific line until the full parser returns.
 - **Keywords**: It searches for learned keywords within unparsed gaps. It strictly enforces **word boundaries** (spaces, symbols, or parsed nodes) to prevent partial matches.
 - **Operators**: It matches operators, prioritizing longer operators (e.g., `+=`) before shorter ones (`+`).
+- **Typed prefixes**: It can color the rest of a line from a configured prefix,
+  such as `##`, as a specific token type.
+- **Typed spans**: It can color same-line delimited spans, such as `{name}`, as
+  a specific token type.
 
 ## 5. Reconciliation
 Emergency parsing is **temporary**. Once the parser server returns a perfectly accurate `Token Stream`:
@@ -58,9 +62,22 @@ block_start=/*
 block_end=*/
 ident_extra_chars=$@             # Characters (beyond alphanumeric/underscore) allowed in identifiers
 quotes="'                        # Characters that start/end string literals
+prefix_tokens=##:preprocessor    # Color same-line prefixed constructs
+span_tokens={:}:macro_variable   # Color same-line delimited constructs
 ```
 
 ### Key Behaviors
 - **Multiple Values:** `keywords`, `operators`, and `line_comment` support comma-separated lists. To define a comma `,` as an operator, escape it with a backslash `\,`.
 - **Greedy Numerics:** The EP scanner automatically and greedily consumes numeric literals starting with `0-9` (including hex, floats, and suffixes like `ULL`) without needing any configuration.
 - **Identifiers:** Any word matching the C-style identifier pattern `[a-zA-Z_][a-zA-Z0-9_]*` that is *not* found in the `keywords` list is automatically highlighted as `LEXER_IDENTIFIER`. To support languages with extra characters in variable names (like PHP's `$var` or Lisp's `my-var`), add them to `ident_extra_chars`.
+- **Typed Prefixes:** `prefix_tokens` accepts comma-separated `prefix:type`
+  entries. Prefixes match after optional leading whitespace and color the rest
+  of that line without overriding authoritative parser nodes.
+- **Typed Spans:** `span_tokens` accepts comma-separated `start:end:type`
+  entries. Spans are same-line heuristics and are ignored when no closing
+  delimiter is found before an authoritative parser node.
+- **Learning Macro Shapes:** If an authoritative parser emits a
+  `LEXER_PREPROCESSOR` token that starts with `#` or `%`, EP learns the leading
+  punctuation run as a typed preprocessor prefix. If it emits a
+  `LEXER_MACRO_VARIABLE` token shaped like `{name}`, EP learns `{`/`}` as a
+  typed macro-variable span.

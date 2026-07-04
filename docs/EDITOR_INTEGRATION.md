@@ -28,6 +28,10 @@ InitialLoad *initial = create_initial_load("file_path", content);
 load_initial_content(cb, initial);
 ```
 
+DSLSH source positions are logical Unicode codepoint offsets. Editors should
+send transaction columns/counts in codepoints and convert codepoint positions to
+screen cells only when rendering or moving the cursor.
+
 ## 3. Handling User Edits
 For every keystroke or edit, apply a transaction. The library will automatically perform **Emergency Parsing** to keep the UI responsive.
 

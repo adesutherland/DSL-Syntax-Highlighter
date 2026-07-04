@@ -71,6 +71,127 @@ CB_Node cb_create_node(CB_NodeType type, size_t pos, size_t length) {
     return node;
 }
 
+static int cb_utf8_byte_offset_is_boundary(const char *source,
+                                           size_t source_byte_length,
+                                           size_t byte_pos) {
+    unsigned char c;
+
+    if (!source) return 0;
+    if (byte_pos == 0 || byte_pos == source_byte_length) return 1;
+    if (byte_pos > source_byte_length) return 0;
+    c = (unsigned char)source[byte_pos];
+    return (c & 0xc0) != 0x80;
+}
+
+int cb_utf8_byte_span_to_codepoint_span(const char *source,
+                                        size_t source_byte_length,
+                                        size_t byte_pos,
+                                        size_t byte_length,
+                                        size_t *pos,
+                                        size_t *length) {
+    size_t byte_end;
+
+    if (pos) *pos = 0;
+    if (length) *length = 0;
+    if (!source || !pos || !length) return 0;
+    if (byte_pos > source_byte_length) return 0;
+
+    byte_end = byte_pos + byte_length;
+    if (byte_end < byte_pos || byte_end > source_byte_length) byte_end = source_byte_length;
+    if (!cb_utf8_byte_offset_is_boundary(source, source_byte_length, byte_pos)) return 0;
+    if (!cb_utf8_byte_offset_is_boundary(source, source_byte_length, byte_end)) return 0;
+
+    *pos = utf8nlen(source, byte_pos);
+    *length = utf8nlen(source + byte_pos, byte_end - byte_pos);
+    return 1;
+}
+
+static size_t cb_character_utf8_length(CodeBufferCharacter *character) {
+    char32_t *codepoints;
+
+    if (!character || character->codepoints == 0) return 0;
+    codepoints = character->heap_character ? character->heap_character : character->character;
+    return utf32_utf8_length(codepoints, character->codepoints);
+}
+
+static int cb_line_byte_column_to_codepoint_column(CodeBufferLine *line,
+                                                   size_t byte_column,
+                                                   size_t *codepoint_column) {
+    size_t col;
+    size_t byte_pos;
+    size_t char_bytes;
+
+    if (codepoint_column) *codepoint_column = 0;
+    if (!line || !codepoint_column) return 0;
+
+    byte_pos = 0;
+    for (col = 0; col < line->length; col++) {
+        if (byte_pos == byte_column) {
+            *codepoint_column = col;
+            return 1;
+        }
+        char_bytes = cb_character_utf8_length(&line->characters[col]);
+        if (byte_pos + char_bytes > byte_column) return 0;
+        byte_pos += char_bytes;
+    }
+
+    if (byte_pos == byte_column) {
+        *codepoint_column = line->length;
+        return 1;
+    }
+    return 0;
+}
+
+int cb_line_byte_span_to_codepoint_span(CodeBuffer *cb,
+                                        size_t line,
+                                        size_t byte_column,
+                                        size_t byte_length,
+                                        size_t *pos,
+                                        size_t *length) {
+    size_t line_index;
+    size_t absolute_pos;
+    size_t start_col;
+    size_t end_col;
+    size_t end_byte_column;
+
+    if (pos) *pos = 0;
+    if (length) *length = 0;
+    if (!cb || !pos || !length) return 0;
+    if (line >= cb->line_count) return 0;
+
+    end_byte_column = byte_column + byte_length;
+    if (end_byte_column < byte_column) return 0;
+
+    if (!cb_line_byte_column_to_codepoint_column(&cb->lines[line], byte_column, &start_col)) return 0;
+    if (!cb_line_byte_column_to_codepoint_column(&cb->lines[line], end_byte_column, &end_col)) {
+        return 0;
+    }
+    if (end_col < start_col) return 0;
+
+    absolute_pos = 0;
+    for (line_index = 0; line_index < line; line_index++) {
+        absolute_pos += cb->lines[line_index].length + 1;
+    }
+
+    *pos = absolute_pos + start_col;
+    *length = end_col - start_col;
+    return 1;
+}
+
+CB_Node cb_create_node_from_utf8_byte_span(CB_NodeType type,
+                                           const char *source,
+                                           size_t source_byte_length,
+                                           size_t byte_pos,
+                                           size_t byte_length) {
+    size_t pos;
+    size_t length;
+
+    if (!cb_utf8_byte_span_to_codepoint_span(source, source_byte_length, byte_pos, byte_length, &pos, &length)) {
+        return cb_create_node(LEXER_UNKNOWN, 0, 0);
+    }
+    return cb_create_node(type, pos, length);
+}
+
 /* Free the CB_ParseTree and all its nodes */
 void cb_free_token_buffer(CB_ParseTree *tb) {
     if (tb == NULL)
@@ -924,6 +1045,9 @@ const char* cb_token_type_to_string(CB_NodeType type) {
         case LEXER_TYPE_IDENTIFIER: return "LEXER_TYPE_IDENTIFIER";
         case LEXER_FUNCTION_IDENTIFIER: return "LEXER_FUNCTION_IDENTIFIER";
         case LEXER_CONSTANT_IDENTIFIER: return "LEXER_CONSTANT_IDENTIFIER";
+        case LEXER_MACRO_IDENTIFIER: return "LEXER_MACRO_IDENTIFIER";
+        case LEXER_MACRO_VARIABLE: return "LEXER_MACRO_VARIABLE";
+        case LEXER_MACRO_CONSTANT: return "LEXER_MACRO_CONSTANT";
         case PARSE_TREE: return "PARSE_TREE";
         case PARSE_TREE_FILE: return "PARSE_TREE_FILE";
         case PARSE_TREE_CODEBLOCK: return "PARSE_TREE_CODEBLOCK";

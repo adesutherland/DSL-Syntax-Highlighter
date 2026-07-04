@@ -61,6 +61,15 @@ void cb_free_ep_rules(EP_Rules *rules) {
     if (rules->block_comment_ends) free(rules->block_comment_ends);
     free(rules->string_quotes);
     if (rules->ident_extra_chars) free(rules->ident_extra_chars);
+    for (size_t i = 0; i < rules->typed_prefix_rule_count; i++) {
+        free(rules->typed_prefix_rules[i].prefix);
+    }
+    free(rules->typed_prefix_rules);
+    for (size_t i = 0; i < rules->typed_span_rule_count; i++) {
+        free(rules->typed_span_rules[i].start);
+        free(rules->typed_span_rules[i].end);
+    }
+    free(rules->typed_span_rules);
     free(rules);
 }
 
@@ -82,6 +91,112 @@ static void add_unique_char(char **list, size_t *count, char c) {
     *list = realloc(*list, *count + 1);
     (*list)[*count] = c;
     (*count)++;
+}
+
+static char *trim_in_place(char *value) {
+    char *end;
+
+    while (value && isspace((unsigned char)*value)) value++;
+    if (!value || *value == '\0') return value;
+    end = value + strlen(value) - 1;
+    while (end > value && isspace((unsigned char)*end)) {
+        *end = '\0';
+        end--;
+    }
+    return value;
+}
+
+static int token_type_from_name(const char *name, char *token_type) {
+    char lowered[64];
+    size_t len;
+
+    if (!name || !token_type) return 0;
+    while (isspace((unsigned char)*name)) name++;
+    len = strlen(name);
+    while (len > 0 && isspace((unsigned char)name[len - 1])) len--;
+    if (len == 0 || len >= sizeof(lowered)) return 0;
+    for (size_t i = 0; i < len; i++) lowered[i] = (char)tolower((unsigned char)name[i]);
+    lowered[len] = '\0';
+
+    if (strcmp(lowered, "preprocessor") == 0 || strcmp(lowered, "lexer_preprocessor") == 0) {
+        *token_type = (char)LEXER_PREPROCESSOR;
+    } else if (strcmp(lowered, "macro") == 0 || strcmp(lowered, "macro_identifier") == 0 ||
+               strcmp(lowered, "macro_name") == 0 || strcmp(lowered, "lexer_macro_identifier") == 0) {
+        *token_type = (char)LEXER_MACRO_IDENTIFIER;
+    } else if (strcmp(lowered, "macro_variable") == 0 || strcmp(lowered, "macro_var") == 0 ||
+               strcmp(lowered, "template_variable") == 0 || strcmp(lowered, "lexer_macro_variable") == 0) {
+        *token_type = (char)LEXER_MACRO_VARIABLE;
+    } else if (strcmp(lowered, "macro_constant") == 0 || strcmp(lowered, "preprocessor_constant") == 0 ||
+               strcmp(lowered, "lexer_macro_constant") == 0) {
+        *token_type = (char)LEXER_MACRO_CONSTANT;
+    } else if (strcmp(lowered, "constant") == 0 || strcmp(lowered, "constant_identifier") == 0 ||
+               strcmp(lowered, "lexer_constant_identifier") == 0) {
+        *token_type = (char)LEXER_CONSTANT_IDENTIFIER;
+    } else if (strcmp(lowered, "function") == 0 || strcmp(lowered, "function_identifier") == 0 ||
+               strcmp(lowered, "lexer_function_identifier") == 0) {
+        *token_type = (char)LEXER_FUNCTION_IDENTIFIER;
+    } else if (strcmp(lowered, "identifier") == 0 || strcmp(lowered, "lexer_identifier") == 0) {
+        *token_type = (char)LEXER_IDENTIFIER;
+    } else if (strcmp(lowered, "keyword") == 0 || strcmp(lowered, "lexer_keyword") == 0) {
+        *token_type = (char)LEXER_KEYWORD;
+    } else if (strcmp(lowered, "operator") == 0 || strcmp(lowered, "lexer_operator") == 0) {
+        *token_type = (char)LEXER_OPERATOR;
+    } else if (strcmp(lowered, "separator") == 0 || strcmp(lowered, "lexer_separator") == 0) {
+        *token_type = (char)LEXER_SEPARATOR;
+    } else if (strcmp(lowered, "string") == 0 || strcmp(lowered, "string_literal") == 0 ||
+               strcmp(lowered, "lexer_string_literal") == 0) {
+        *token_type = (char)LEXER_STRING_LITERAL;
+    } else if (strcmp(lowered, "comment") == 0 || strcmp(lowered, "lexer_comment") == 0) {
+        *token_type = (char)LEXER_COMMENT;
+    } else if (strcmp(lowered, "number") == 0 || strcmp(lowered, "number_literal") == 0 ||
+               strcmp(lowered, "lexer_number_literal") == 0) {
+        *token_type = (char)LEXER_NUMBER_LITERAL;
+    } else {
+        return 0;
+    }
+    return 1;
+}
+
+static void add_typed_prefix_rule(EP_Rules *rules, const char *prefix, char token_type) {
+    EP_TypedPrefixRule *new_rules;
+
+    if (!rules || !prefix || prefix[0] == '\0') return;
+    for (size_t i = 0; i < rules->typed_prefix_rule_count; i++) {
+        if (strcmp(rules->typed_prefix_rules[i].prefix, prefix) == 0 &&
+            rules->typed_prefix_rules[i].token_type == token_type) {
+            return;
+        }
+    }
+
+    new_rules = realloc(rules->typed_prefix_rules,
+                        sizeof(EP_TypedPrefixRule) * (rules->typed_prefix_rule_count + 1));
+    if (!new_rules) return;
+    rules->typed_prefix_rules = new_rules;
+    rules->typed_prefix_rules[rules->typed_prefix_rule_count].prefix = strdup(prefix);
+    rules->typed_prefix_rules[rules->typed_prefix_rule_count].token_type = token_type;
+    rules->typed_prefix_rule_count++;
+}
+
+static void add_typed_span_rule(EP_Rules *rules, const char *start, const char *end, char token_type) {
+    EP_TypedSpanRule *new_rules;
+
+    if (!rules || !start || !end || start[0] == '\0' || end[0] == '\0') return;
+    for (size_t i = 0; i < rules->typed_span_rule_count; i++) {
+        if (strcmp(rules->typed_span_rules[i].start, start) == 0 &&
+            strcmp(rules->typed_span_rules[i].end, end) == 0 &&
+            rules->typed_span_rules[i].token_type == token_type) {
+            return;
+        }
+    }
+
+    new_rules = realloc(rules->typed_span_rules,
+                        sizeof(EP_TypedSpanRule) * (rules->typed_span_rule_count + 1));
+    if (!new_rules) return;
+    rules->typed_span_rules = new_rules;
+    rules->typed_span_rules[rules->typed_span_rule_count].start = strdup(start);
+    rules->typed_span_rules[rules->typed_span_rule_count].end = strdup(end);
+    rules->typed_span_rules[rules->typed_span_rule_count].token_type = token_type;
+    rules->typed_span_rule_count++;
 }
 
 /* Sort operators by length descending to match longest first */
@@ -115,6 +230,15 @@ static EP_Rules* copy_ep_rules(EP_Rules *src) {
     for (size_t i = 0; i < src->string_quote_count; i++) add_unique_char(&dst->string_quotes, &dst->string_quote_count, src->string_quotes[i]);
     dst->is_positional = src->is_positional;
     if (src->ident_extra_chars) dst->ident_extra_chars = strdup(src->ident_extra_chars);
+    for (size_t i = 0; i < src->typed_prefix_rule_count; i++) {
+        add_typed_prefix_rule(dst, src->typed_prefix_rules[i].prefix, src->typed_prefix_rules[i].token_type);
+    }
+    for (size_t i = 0; i < src->typed_span_rule_count; i++) {
+        add_typed_span_rule(dst,
+                            src->typed_span_rules[i].start,
+                            src->typed_span_rules[i].end,
+                            src->typed_span_rules[i].token_type);
+    }
     sort_operators(dst);
     return dst;
 }
@@ -149,6 +273,51 @@ static void parse_comma_list(char ***list, size_t *count, char *val) {
     if (*start) {
         add_unique_string(list, count, start);
     }
+}
+
+static void parse_typed_prefix_list(EP_Rules *rules, char *val) {
+    char **items = NULL;
+    size_t item_count = 0;
+
+    parse_comma_list(&items, &item_count, val);
+    for (size_t i = 0; i < item_count; i++) {
+        char *sep = strrchr(items[i], ':');
+        char token_type;
+        if (sep) {
+            *sep = '\0';
+            char *prefix = trim_in_place(items[i]);
+            char *type_name = trim_in_place(sep + 1);
+            if (token_type_from_name(type_name, &token_type)) {
+                add_typed_prefix_rule(rules, prefix, token_type);
+            }
+        }
+        free(items[i]);
+    }
+    free(items);
+}
+
+static void parse_typed_span_list(EP_Rules *rules, char *val) {
+    char **items = NULL;
+    size_t item_count = 0;
+
+    parse_comma_list(&items, &item_count, val);
+    for (size_t i = 0; i < item_count; i++) {
+        char *first_sep = strchr(items[i], ':');
+        char *last_sep = strrchr(items[i], ':');
+        char token_type;
+        if (first_sep && last_sep && first_sep != last_sep) {
+            *first_sep = '\0';
+            *last_sep = '\0';
+            char *start = trim_in_place(items[i]);
+            char *end = trim_in_place(first_sep + 1);
+            char *type_name = trim_in_place(last_sep + 1);
+            if (token_type_from_name(type_name, &token_type)) {
+                add_typed_span_rule(rules, start, end, token_type);
+            }
+        }
+        free(items[i]);
+    }
+    free(items);
 }
 
 void cb_load_ep_config_from_string(const char *config_str) {
@@ -208,6 +377,10 @@ void cb_load_ep_config_from_string(const char *config_str) {
                     current->shebang_pattern = strdup(val);
                 } else if (strcmp(l, "ident_extra_chars") == 0) {
                     current->ident_extra_chars = strdup(val);
+                } else if (strcmp(l, "prefix_tokens") == 0) {
+                    parse_typed_prefix_list(current, val);
+                } else if (strcmp(l, "span_tokens") == 0) {
+                    parse_typed_span_list(current, val);
                 }
             }
         }
@@ -243,6 +416,60 @@ void cb_load_ep_config(const char *path) {
  * "Do No Harm": Characters that belong to a parsed node (node != NULL) are NEVER overwritten,
  * but the scanner still reads them to maintain string/comment state.
  */
+static int line_matches_ascii(CodeBufferLine *line, size_t pos, const char *text, int require_unparsed) {
+    size_t len;
+
+    if (!line || !text) return 0;
+    len = strlen(text);
+    if (len == 0 || pos + len > line->length) return 0;
+    for (size_t i = 0; i < len; i++) {
+        if (require_unparsed && line->characters[pos + i].node != NULL) return 0;
+        if ((char)line->characters[pos + i].character[0] != text[i]) return 0;
+    }
+    return 1;
+}
+
+static int is_line_prefix_position(CodeBufferLine *line, size_t pos) {
+    if (!line) return 0;
+    for (size_t i = 0; i < pos; i++) {
+        if (!utf32_isspace(line->characters[i].character[0])) return 0;
+    }
+    return 1;
+}
+
+static void color_unparsed_range(CodeBufferLine *line, size_t start, size_t end, char token_type) {
+    if (!line || start >= end || start >= line->length) return;
+    if (end > line->length) end = line->length;
+    for (size_t i = start; i < end; i++) {
+        if (line->characters[i].node == NULL) {
+            line->characters[i].token_type = token_type;
+        }
+    }
+}
+
+static int apply_typed_span_rule(CodeBufferLine *line, size_t pos, EP_Rules *rules, size_t *end_pos) {
+    if (!line || !rules || !end_pos) return 0;
+
+    for (size_t r = 0; r < rules->typed_span_rule_count; r++) {
+        EP_TypedSpanRule *rule = &rules->typed_span_rules[r];
+        size_t start_len = strlen(rule->start);
+        size_t end_len = strlen(rule->end);
+
+        if (!line_matches_ascii(line, pos, rule->start, 1)) continue;
+
+        for (size_t cursor = pos + start_len; cursor + end_len <= line->length; cursor++) {
+            if (line->characters[cursor].node != NULL) break;
+            if (line_matches_ascii(line, cursor, rule->end, 1)) {
+                size_t span_end = cursor + end_len;
+                color_unparsed_range(line, pos, span_end, rule->token_type);
+                *end_pos = span_end;
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
 static void cb_emergency_scan_line(CodeBuffer *cb, int line_idx) {
     if (line_idx < 0 || line_idx >= (int)cb->line_count) return;
     CodeBufferLine *line = &cb->lines[line_idx];
@@ -330,6 +557,23 @@ static void cb_emergency_scan_line(CodeBuffer *cb, int line_idx) {
         if (c->node != NULL) continue;
 
         if (c->token_type == LEXER_WHITESPACE) continue;
+
+        if (!in_string && !in_comment && rules) {
+            for (size_t r = 0; r < rules->typed_prefix_rule_count; r++) {
+                EP_TypedPrefixRule *rule = &rules->typed_prefix_rules[r];
+                if (is_line_prefix_position(line, i) && line_matches_ascii(line, i, rule->prefix, 1)) {
+                    color_unparsed_range(line, i, line->length, rule->token_type);
+                    i = line->length - 1;
+                    goto next_char;
+                }
+            }
+
+            size_t span_end = 0;
+            if (apply_typed_span_rule(line, i, rules, &span_end)) {
+                i = span_end - 1;
+                goto next_char;
+            }
+        }
 
         if (!in_string && !in_comment) {
             if (cp >= '0' && cp <= '9') {
@@ -468,6 +712,27 @@ static void extract_rules_recursive(CodeBuffer *cb, CB_Node *node, EP_Rules *rul
     if (text) {
         switch (node->type) {
             case LEXER_KEYWORD: add_unique_string(&rules->keywords, &rules->keyword_count, text); break;
+            case LEXER_PREPROCESSOR: {
+                char *prefix = trim_in_place(text);
+                size_t prefix_len = 0;
+                if (prefix[0] == '#' || prefix[0] == '%') {
+                    while (prefix[prefix_len] == prefix[0]) prefix_len++;
+                    if (prefix_len > 0) {
+                        char saved = prefix[prefix_len];
+                        prefix[prefix_len] = '\0';
+                        add_typed_prefix_rule(rules, prefix, (char)LEXER_PREPROCESSOR);
+                        prefix[prefix_len] = saved;
+                    }
+                }
+                break;
+            }
+            case LEXER_MACRO_VARIABLE: {
+                size_t len = strlen(text);
+                if (len >= 2 && text[0] == '{' && text[len - 1] == '}') {
+                    add_typed_span_rule(rules, "{", "}", (char)LEXER_MACRO_VARIABLE);
+                }
+                break;
+            }
             case LEXER_OPERATOR:
             case LEXER_OPERATOR_ASSIGN:
             case LEXER_OPERATOR_ARITHMETIC:

@@ -171,7 +171,10 @@ typedef enum CB_NodeType {
     LEXER_IDENTIFIER,          // Represents user-defined names such as variable names, function names, etc. This token can include an optional unique_i attribute to help track identifiers within the correct scope.
     LEXER_TYPE_IDENTIFIER,     // Represents types, classes, structs, etc.
     LEXER_FUNCTION_IDENTIFIER, // Represents function/method names
-    LEXER_CONSTANT_IDENTIFIER, // Represents constants or macros
+    LEXER_CONSTANT_IDENTIFIER, // Represents language/runtime constants
+    LEXER_MACRO_IDENTIFIER,    // Represents macro definitions, names, or calls
+    LEXER_MACRO_VARIABLE,      // Represents macro/template variables
+    LEXER_MACRO_CONSTANT,      // Represents preprocessor or macro-time constants
 
     // *** Parse Tree Control Tokens - non-leaf nodes in the parse tree ***
 
@@ -210,9 +213,9 @@ typedef enum TransactionType {
 /* Structure to represent a single parse tree node (leaf or non-leaf) */
 typedef struct CB_Node {
     CB_NodeType type;         // The type attribute indicates the kind of node (e.g., keyword, identifier, operator, etc.)
-    size_t pos;               // The pos attribute is used to indicate the starting position of the token in the buffer
-    size_t length;            // Every token includes a length to indicate the number of characters it covers.
-                              // This is especially important for maintaining line and column information in the editor
+    size_t pos;               // Zero-based Unicode codepoint offset in the logical buffer.
+    size_t length;            // Number of Unicode codepoints covered by the token.
+                              // Display/screen widths are an editor concern, not part of this source range contract.
     int identifier_id;        // For LEXER_IDENTIFIER especially. The unique_id attribute is optional and can be used to uniquely identify the symbol across scopes (e.g., for renaming or searching)
     CB_Severity severity;     // The severity attribute is used to indicate the severity of the message (e.g., information, warning, error)
     char *message_code;       // The message_code attribute is used to provide a unique identifier for the message (e.g., ERR001)
@@ -245,14 +248,14 @@ typedef struct CommunicationFunctions CommunicationFunctions;
 struct CodeBuffer;
 typedef void (*ParserFunction)(struct CodeBuffer *cb);
 
-/* Structure for the attributes of a character in the code buffer.
+/* Structure for the attributes of one logical Unicode codepoint in the code buffer.
  * These are designed to assist an editor in providing fast access for
  * syntax highlighting and error messages. An editor can then access
  * the parser node for full details if need be */
 typedef struct CodeBufferCharacter {
-    char32_t character[4];       // The character itself, stored as upto 4 UTF-32 codepoints
+    char32_t character[4];       // The codepoint itself. Protocol positions address one codepoint per slot.
     char32_t *heap_character;    // Pointer to the heap-allocated character, if needed
-    size_t codepoints;           // Number of codepoints in the character
+    size_t codepoints;           // Number of stored codepoints; protocol/source positions currently require 1.
     char token_type;             // CB_NodeType coded as char - used to determine highlighting
     char severity;               // CB_Severity coded as char - indicates is a message is associated with the character
     char subtree_type;           // CB_NodeType coded as char - indicates if the character starts a parse tree, an editor might use this for code folding
@@ -266,9 +269,9 @@ typedef struct CodeBufferCharacter {
                                  // Editors should not store this pointer as it may change when the parse tree is updated
 } CodeBufferCharacter;
 
-/* Structure for a line of characters (null terminated) with a line length */
+/* Structure for a line of Unicode codepoints (null terminated) with a line length */
 typedef struct CodeBufferLine {
-    CodeBufferCharacter *characters; // Array of characters in the line
+    CodeBufferCharacter *characters; // Array of codepoint slots in the line
                                      // Each line is a null-terminated array of CodeBufferCharacter.
                                      // This allows for fast access to the characters in the code buffer.
                                      // The first character in each line is the first character of the line.
@@ -278,6 +281,17 @@ typedef struct CodeBufferLine {
                                      // parser
     size_t length;                   // Length of the line (excluding the null terminator)
 } CodeBufferLine;
+
+typedef struct EP_TypedPrefixRule {
+    char *prefix;
+    char token_type;
+} EP_TypedPrefixRule;
+
+typedef struct EP_TypedSpanRule {
+    char *start;
+    char *end;
+    char token_type;
+} EP_TypedSpanRule;
 
 /* Emergency Parsing (EP) Rules - Learned from the authoritative parser */
 typedef struct EP_Rules {
@@ -296,6 +310,10 @@ typedef struct EP_Rules {
     size_t string_quote_count;
     int is_positional; // e.g., Python-style indentation
     char *ident_extra_chars; // Extra characters allowed in identifiers (e.g. "$", "-", etc.)
+    EP_TypedPrefixRule *typed_prefix_rules; // Same-line prefix rules, e.g. ## -> preprocessor
+    size_t typed_prefix_rule_count;
+    EP_TypedSpanRule *typed_span_rules; // Same-line delimited spans, e.g. {name} -> macro variable
+    size_t typed_span_rule_count;
 } EP_Rules;
 
 /* State of the out-of-process parser */
@@ -544,6 +562,29 @@ char* get_code_buffer_source(CodeBuffer *cb);
 
 /* Create a blank CB_Node */
 CB_Node cb_create_node(CB_NodeType type, size_t pos, size_t length);
+
+/* Convert a UTF-8 byte span into DSLSH codepoint positions. */
+int cb_utf8_byte_span_to_codepoint_span(const char *source,
+                                        size_t source_byte_length,
+                                        size_t byte_pos,
+                                        size_t byte_length,
+                                        size_t *pos,
+                                        size_t *length);
+
+/* Convert a byte span on one CodeBuffer line into absolute DSLSH codepoint positions. */
+int cb_line_byte_span_to_codepoint_span(CodeBuffer *cb,
+                                        size_t line,
+                                        size_t byte_column,
+                                        size_t byte_length,
+                                        size_t *pos,
+                                        size_t *length);
+
+/* Create a CB_Node from a byte span in a UTF-8 source buffer. */
+CB_Node cb_create_node_from_utf8_byte_span(CB_NodeType type,
+                                           const char *source,
+                                           size_t source_byte_length,
+                                           size_t byte_pos,
+                                           size_t byte_length);
 
 /* Set the current_parent node to the 'parent' node */
 void cb_set_current_parent_to_node(CB_ParseTree *tb, CB_Node *parent);

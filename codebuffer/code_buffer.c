@@ -524,7 +524,11 @@ void base_apply_transaction(CodeBuffer *cb, Transaction transaction) {
                             extend = 1; /* Always extend strings/comments */
                         } else if (isalnum(cp) || cp == '_') {
                             /* Extend if it's alphanumeric/underscore AND the previous character is part of a word-like token */
-                            if (attr_char.token_type == LEXER_IDENTIFIER || attr_char.token_type == LEXER_KEYWORD || attr_char.token_type == LEXER_NUMBER_LITERAL) {
+                            if (attr_char.token_type == LEXER_IDENTIFIER || attr_char.token_type == LEXER_KEYWORD ||
+                                attr_char.token_type == LEXER_NUMBER_LITERAL ||
+                                attr_char.token_type == LEXER_MACRO_IDENTIFIER ||
+                                attr_char.token_type == LEXER_MACRO_VARIABLE ||
+                                attr_char.token_type == LEXER_MACRO_CONSTANT) {
                                 extend = 1;
                             }
                         } else if (ispunct(cp) && cp != '"' && cp != '\'' && cp != '#' && cp != '/') {

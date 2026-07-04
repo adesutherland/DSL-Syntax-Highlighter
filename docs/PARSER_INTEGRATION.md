@@ -5,6 +5,14 @@ This guide explains how to build a language parser (server) using the DSL Syntax
 ## 1. Implementation
 A parser must implement the `ParserFunction` signature.
 
+All `CB_Node.pos`, `CB_Node.length`, transaction columns, and serialized token
+ranges are zero-based Unicode codepoint offsets in the logical source buffer.
+They are not UTF-8 byte offsets and not rendered screen columns. A parser may
+lex byte pointers internally and hand byte spans to DSLSH conversion helpers
+such as `cb_utf8_byte_span_to_codepoint_span`,
+`cb_line_byte_span_to_codepoint_span`, or
+`cb_create_node_from_utf8_byte_span` before publishing nodes.
+
 ```c
 void my_language_parser(CodeBuffer *cb) {
     // 1. Get the source code
@@ -81,7 +89,10 @@ To ensure your parser looks good in all SDSLH-compatible editors (like THE and `
 | `LEXER_KEYWORD` | Reserved words, built-in commands, opcodes. |
 | `LEXER_IDENTIFIER` | Variable names, label definitions, general symbols. |
 | `LEXER_FUNCTION_IDENTIFIER` | Function names, method calls, labels. |
-| `LEXER_CONSTANT_IDENTIFIER` | Constants, macros, registers. |
+| `LEXER_CONSTANT_IDENTIFIER` | Language/runtime constants, registers. |
+| `LEXER_MACRO_IDENTIFIER` | Macro definitions, macro names, macro calls. |
+| `LEXER_MACRO_VARIABLE` | Macro/template variables such as `{name}`. |
+| `LEXER_MACRO_CONSTANT` | Preprocessor or macro-time constants. |
 | `LEXER_PREPROCESSOR` | Compiler directives (`import`, `include`, `.globals`). |
 | `LEXER_OPERATOR` | General operators (`:`, `?`). |
 | `LEXER_OPERATOR_ASSIGN` | Assignment (`=`). |
@@ -93,7 +104,8 @@ To ensure your parser looks good in all SDSLH-compatible editors (like THE and `
 #### 1. Column Offset Mismatch
 If highlighting is shifted by one or two characters, your parser's column calculation likely differs from the `CodeBuffer`'s view.
 - **Rule**: `CodeBuffer` considers the character *after* a `\n` to be column 0 of the next line.
-- **Troubleshooting**: Check your lexer's newline handling. Ensure `linestart` is reset correctly to the cursor position *immediately after* the newline character(s) are consumed.
+- **Rule**: Columns are Unicode codepoint offsets, not UTF-8 byte offsets.
+- **Troubleshooting**: Check your lexer's newline handling. Ensure `linestart` is reset correctly to the cursor position *immediately after* the newline character(s) are consumed. If your lexer uses byte pointers, use the DSLSH byte-span conversion helpers rather than publishing raw byte offsets.
 
 #### 2. Protocol Corruption
 If the editor reports a crash immediately upon connection:
