@@ -30,7 +30,11 @@ int main(int argc, char **argv) {
         return 2;
     }
 
+#ifdef _WIN32
+    written = snprintf(parser_cmd, sizeof(parser_cmd), "\"%s\" -s --syntaxhighlight", argv[1]);
+#else
     written = snprintf(parser_cmd, sizeof(parser_cmd), "'%s' -s --syntaxhighlight", argv[1]);
+#endif
     assert(written >= 0 && written < (int)sizeof(parser_cmd));
 
     editor_init();
