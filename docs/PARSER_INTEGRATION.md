@@ -13,6 +13,39 @@ such as `cb_utf8_byte_span_to_codepoint_span`,
 `cb_line_byte_span_to_codepoint_span`, or
 `cb_create_node_from_utf8_byte_span` before publishing nodes.
 
+When one parse projects many byte spans from the same source, build one
+`CB_UTF8PositionIndex` and reuse it. The stateless helper rescans from the
+start of the source and is intended for occasional conversions, not a token
+stream:
+
+```c
+CB_UTF8PositionIndex positions;
+size_t pos;
+size_t length;
+
+if (!cb_utf8_position_index_init(&positions, source, source_byte_length)) {
+    /* Handle an unusable byte sequence or allocation failure. */
+    return;
+}
+
+if (cb_utf8_position_index_span(&positions,
+                                token_byte_offset,
+                                token_byte_length,
+                                &pos,
+                                &length)) {
+    cb_add_child_node(tb, cb_create_node(LEXER_IDENTIFIER, pos, length));
+}
+
+cb_utf8_position_index_free(&positions);
+```
+
+The index references rather than copies `source`, so the source must remain
+alive and unchanged until `cb_utf8_position_index_free()`. ASCII input uses
+direct byte/codepoint identity without an offsets allocation. Non-ASCII input
+stores exact codepoint boundaries and resolves spans by binary search. A span
+whose start or end falls inside a multibyte character is rejected, as it is by
+the stateless converter. Indexed lookups are order-independent.
+
 ```c
 void my_language_parser(CodeBuffer *cb) {
     // 1. Get the source code
@@ -107,12 +140,18 @@ If highlighting is shifted by one or two characters, your parser's column calcul
 - **Rule**: Columns are Unicode codepoint offsets, not UTF-8 byte offsets.
 - **Troubleshooting**: Check your lexer's newline handling. Ensure `linestart` is reset correctly to the cursor position *immediately after* the newline character(s) are consumed. If your lexer uses byte pointers, use the DSLSH byte-span conversion helpers rather than publishing raw byte offsets.
 
-#### 2. Protocol Corruption
+#### 2. Large Files Time Out
+If a parser is correct on small sources but slows sharply as token count grows:
+- build one `CB_UTF8PositionIndex` per immutable source instead of calling the stateless whole-source conversion for every token;
+- index or advance through the parser's own token collection instead of rescanning it from the head for each `cb_add_missing_tokens()` callback; and
+- benchmark an optimized build, because parser-mode latency is an end-user path.
+
+#### 3. Protocol Corruption
 If the editor reports a crash immediately upon connection:
 - **Cause**: Your parser is likely printing debug messages to `stdout`.
 - **Fix**: In `stdio` mode, `stdout` is reserved for the hex-encoded SDSLH protocol. Use a dedicated log file or `stderr` for debugging. Use `cb_log_init("my_parser.log")` provided by the library.
 
-#### 3. Hanging / Infinite Loops
+#### 4. Hanging / Infinite Loops
 If the editor freezes during a parse:
 - The library uses a 10-second watchdog in `parser_tester`. If it fails, the parser has a logic error in its tree traversal or lexing loop.
 - Ensure your `while` loops always advance the cursor, even on unknown characters.

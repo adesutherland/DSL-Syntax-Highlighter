@@ -365,33 +365,97 @@ void test_ep_learns_macro_shapes() {
 
 void test_byte_span_to_codepoint_span() {
     const char *source = "say \xC3\xA9 + bad";
+    const char *ascii_source = "say value + bad";
     size_t pos;
     size_t len;
+    CB_UTF8PositionIndex index;
     CodeBuffer *cb;
+    int rc;
 
     printf("Testing Byte Span to Codepoint Span Conversion...\n");
 
-    assert(cb_utf8_byte_span_to_codepoint_span(source, strlen(source), 9, 3, &pos, &len));
+    rc = cb_utf8_byte_span_to_codepoint_span(source, strlen(source), 9, 3, &pos, &len);
+    assert(rc);
+    if (!rc) return;
     assert(pos == 8);
     assert(len == 3);
-    assert(cb_utf8_byte_span_to_codepoint_span(source, strlen(source), 4, 0, &pos, &len));
+    rc = cb_utf8_byte_span_to_codepoint_span(source, strlen(source), 4, 0, &pos, &len);
+    assert(rc);
+    if (!rc) return;
     assert(pos == 4);
     assert(len == 0);
-    assert(!cb_utf8_byte_span_to_codepoint_span(source, strlen(source), 5, 1, &pos, &len));
+    rc = cb_utf8_byte_span_to_codepoint_span(source, strlen(source), 5, 1, &pos, &len);
+    assert(!rc);
+
+    rc = cb_utf8_position_index_init(&index, source, strlen(source));
+    assert(rc);
+    if (!rc) return;
+    assert(!index.is_ascii);
+    rc = cb_utf8_position_index_span(&index, 9, 3, &pos, &len);
+    assert(rc);
+    if (!rc) {
+        cb_utf8_position_index_free(&index);
+        return;
+    }
+    assert(pos == 8);
+    assert(len == 3);
+    rc = cb_utf8_position_index_span(&index, 4, 0, &pos, &len);
+    assert(rc);
+    if (!rc) {
+        cb_utf8_position_index_free(&index);
+        return;
+    }
+    assert(pos == 4);
+    assert(len == 0);
+    rc = cb_utf8_position_index_span(&index, 5, 1, &pos, &len);
+    assert(!rc);
+    /* Indexed queries are deliberately order-independent. */
+    rc = cb_utf8_position_index_span(&index, 0, 3, &pos, &len);
+    assert(rc);
+    if (!rc) {
+        cb_utf8_position_index_free(&index);
+        return;
+    }
+    assert(pos == 0);
+    assert(len == 3);
+    cb_utf8_position_index_free(&index);
+
+    rc = cb_utf8_position_index_init(&index, ascii_source, strlen(ascii_source));
+    assert(rc);
+    if (!rc) return;
+    assert(index.is_ascii);
+    assert(index.byte_offsets == NULL);
+    rc = cb_utf8_position_index_span(&index, 4, 5, &pos, &len);
+    assert(rc);
+    if (!rc) {
+        cb_utf8_position_index_free(&index);
+        return;
+    }
+    assert(pos == 4);
+    assert(len == 5);
+    cb_utf8_position_index_free(&index);
 
     cb = create_code_buffer(NULL, NULL);
     cb->unique_document_id = strdup("utf8.toy");
     cb->line_count = 1;
     cb->lines = calloc(1, sizeof(CodeBufferLine));
-    assert(utf8_to_line(source, &cb->lines[0]) == 0);
+    rc = utf8_to_line(source, &cb->lines[0]);
+    assert(rc == 0);
+    if (rc != 0) {
+        free_code_buffer(cb);
+        return;
+    }
 
-    assert(cb_line_byte_span_to_codepoint_span(cb, 0, 9, 3, &pos, &len));
+    rc = cb_line_byte_span_to_codepoint_span(cb, 0, 9, 3, &pos, &len);
+    assert(rc);
     assert(pos == 8);
     assert(len == 3);
-    assert(cb_line_byte_span_to_codepoint_span(cb, 0, 4, 0, &pos, &len));
+    rc = cb_line_byte_span_to_codepoint_span(cb, 0, 4, 0, &pos, &len);
+    assert(rc);
     assert(pos == 4);
     assert(len == 0);
-    assert(!cb_line_byte_span_to_codepoint_span(cb, 0, 5, 1, &pos, &len));
+    rc = cb_line_byte_span_to_codepoint_span(cb, 0, 5, 1, &pos, &len);
+    assert(!rc);
 
     printf("Byte Span to Codepoint Span Conversion passed!\n");
     free_code_buffer(cb);

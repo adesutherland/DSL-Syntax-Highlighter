@@ -282,6 +282,18 @@ typedef struct CodeBufferLine {
     size_t length;                   // Length of the line (excluding the null terminator)
 } CodeBufferLine;
 
+/* Per-source UTF-8 byte-boundary index for parser adapters that project many
+ * byte spans into DSLSH's Unicode-codepoint coordinate space. The index
+ * references, but does not own, the source passed to init. ASCII sources need
+ * no offsets allocation because byte and codepoint positions are identical. */
+typedef struct CB_UTF8PositionIndex {
+    const char *source;
+    size_t source_byte_length;
+    size_t codepoint_count;
+    size_t *byte_offsets;
+    int is_ascii;
+} CB_UTF8PositionIndex;
+
 typedef struct EP_TypedPrefixRule {
     char *prefix;
     char token_type;
@@ -570,6 +582,19 @@ int cb_utf8_byte_span_to_codepoint_span(const char *source,
                                         size_t byte_length,
                                         size_t *pos,
                                         size_t *length);
+
+/* Build/free an order-independent byte-boundary index for one UTF-8 source. */
+int cb_utf8_position_index_init(CB_UTF8PositionIndex *index,
+                                const char *source,
+                                size_t source_byte_length);
+void cb_utf8_position_index_free(CB_UTF8PositionIndex *index);
+
+/* Convert a UTF-8 byte span using a previously built position index. */
+int cb_utf8_position_index_span(const CB_UTF8PositionIndex *index,
+                                size_t byte_pos,
+                                size_t byte_length,
+                                size_t *pos,
+                                size_t *length);
 
 /* Convert a byte span on one CodeBuffer line into absolute DSLSH codepoint positions. */
 int cb_line_byte_span_to_codepoint_span(CodeBuffer *cb,

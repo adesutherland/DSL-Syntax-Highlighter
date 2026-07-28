@@ -106,6 +106,135 @@ int cb_utf8_byte_span_to_codepoint_span(const char *source,
     return 1;
 }
 
+static size_t cb_utf8_lead_byte_width(unsigned char c) {
+    if ((c & 0x80) == 0) return 1;
+    if ((c & 0xe0) == 0xc0) return 2;
+    if ((c & 0xf0) == 0xe0) return 3;
+    if ((c & 0xf8) == 0xf0) return 4;
+    return 0;
+}
+
+static int cb_utf8_codepoint_fits(const char *source,
+                                  size_t source_byte_length,
+                                  size_t byte_pos,
+                                  size_t width) {
+    size_t i;
+
+    if (!source || width == 0 || byte_pos + width < byte_pos ||
+        byte_pos + width > source_byte_length) {
+        return 0;
+    }
+    for (i = 1; i < width; i++) {
+        if (((unsigned char)source[byte_pos + i] & 0xc0) != 0x80) return 0;
+    }
+    return 1;
+}
+
+int cb_utf8_position_index_init(CB_UTF8PositionIndex *index,
+                                const char *source,
+                                size_t source_byte_length) {
+    size_t byte_pos;
+    size_t codepoint_count;
+    size_t width;
+
+    if (!index) return 0;
+    memset(index, 0, sizeof(*index));
+    if (!source) return 0;
+
+    index->source = source;
+    index->source_byte_length = source_byte_length;
+    index->is_ascii = 1;
+    byte_pos = 0;
+    codepoint_count = 0;
+    while (byte_pos < source_byte_length) {
+        width = cb_utf8_lead_byte_width((unsigned char)source[byte_pos]);
+        if (!cb_utf8_codepoint_fits(source, source_byte_length, byte_pos, width)) {
+            cb_utf8_position_index_free(index);
+            return 0;
+        }
+        if (width != 1) index->is_ascii = 0;
+        byte_pos += width;
+        codepoint_count++;
+    }
+    index->codepoint_count = codepoint_count;
+
+    if (index->is_ascii) return 1;
+
+    index->byte_offsets = malloc(sizeof(*index->byte_offsets) * (codepoint_count + 1));
+    if (!index->byte_offsets) {
+        cb_utf8_position_index_free(index);
+        return 0;
+    }
+
+    byte_pos = 0;
+    codepoint_count = 0;
+    index->byte_offsets[codepoint_count++] = 0;
+    while (byte_pos < source_byte_length) {
+        byte_pos += cb_utf8_lead_byte_width((unsigned char)source[byte_pos]);
+        index->byte_offsets[codepoint_count++] = byte_pos;
+    }
+    return 1;
+}
+
+void cb_utf8_position_index_free(CB_UTF8PositionIndex *index) {
+    if (!index) return;
+    if (index->byte_offsets) free(index->byte_offsets);
+    memset(index, 0, sizeof(*index));
+}
+
+static int cb_utf8_position_index_boundary(const CB_UTF8PositionIndex *index,
+                                           size_t byte_pos,
+                                           size_t *codepoint_pos) {
+    size_t low;
+    size_t high;
+    size_t mid;
+    size_t candidate;
+
+    if (!index || !codepoint_pos || !index->source) return 0;
+    if (byte_pos > index->source_byte_length) return 0;
+    if (index->is_ascii) {
+        *codepoint_pos = byte_pos;
+        return 1;
+    }
+    if (!index->byte_offsets) return 0;
+
+    low = 0;
+    high = index->codepoint_count + 1;
+    while (low < high) {
+        mid = low + (high - low) / 2;
+        candidate = index->byte_offsets[mid];
+        if (candidate < byte_pos) low = mid + 1;
+        else high = mid;
+    }
+    if (low > index->codepoint_count || index->byte_offsets[low] != byte_pos) return 0;
+    *codepoint_pos = low;
+    return 1;
+}
+
+int cb_utf8_position_index_span(const CB_UTF8PositionIndex *index,
+                                size_t byte_pos,
+                                size_t byte_length,
+                                size_t *pos,
+                                size_t *length) {
+    size_t byte_end;
+    size_t end_pos;
+
+    if (pos) *pos = 0;
+    if (length) *length = 0;
+    if (!index || !pos || !length) return 0;
+    if (byte_pos > index->source_byte_length) return 0;
+
+    byte_end = byte_pos + byte_length;
+    if (byte_end < byte_pos || byte_end > index->source_byte_length) {
+        byte_end = index->source_byte_length;
+    }
+    if (!cb_utf8_position_index_boundary(index, byte_pos, pos)) return 0;
+    if (!cb_utf8_position_index_boundary(index, byte_end, &end_pos)) return 0;
+    if (end_pos < *pos) return 0;
+    *length = end_pos - *pos;
+    return 1;
+}
+
 static size_t cb_character_utf8_length(CodeBufferCharacter *character) {
     char32_t *codepoints;
 
