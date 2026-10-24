@@ -157,31 +157,31 @@ char* cb_serialize_delta(Delta *delta) {
     const char *doc_id = delta->unique_document_id ? delta->unique_document_id : "";
     const char *overlay_id = delta->overlay_id ? delta->overlay_id : "";
 
-    len += sprintf(buf + len, "2|");
+    len += snprintf(buf + len, cap - len, "2|");
     for (size_t i = 0; doc_id[i]; i++) {
         if (len + 4 > cap) {
             cap *= 2;
             buf = (char*)safe_realloc(buf, cap);
         }
-        len += sprintf(buf + len, "%02x", (unsigned char)doc_id[i]);
+        len += snprintf(buf + len, cap - len, "%02x", (unsigned char)doc_id[i]);
     }
     if (len + 128 > cap) {
         cap = len + 1024;
         buf = (char*)safe_realloc(buf, cap);
     }
-    len += sprintf(buf + len, "|%zu|%zu|", delta->base_version, delta->change_version);
+    len += snprintf(buf + len, cap - len, "|%zu|%zu|", delta->base_version, delta->change_version);
     for (size_t i = 0; overlay_id[i]; i++) {
         if (len + 4 > cap) {
             cap *= 2;
             buf = (char*)safe_realloc(buf, cap);
         }
-        len += sprintf(buf + len, "%02x", (unsigned char)overlay_id[i]);
+        len += snprintf(buf + len, cap - len, "%02x", (unsigned char)overlay_id[i]);
     }
     if (len + 128 > cap) {
         cap = len + 1024;
         buf = (char*)safe_realloc(buf, cap);
     }
-    len += sprintf(buf + len, "|%zu", delta->transaction_count);
+    len += snprintf(buf + len, cap - len, "|%zu", delta->transaction_count);
 
     for (size_t i = 0; i < delta->transaction_count; i++) {
         Transaction *t = &delta->transactions[i];
@@ -192,7 +192,7 @@ char* cb_serialize_delta(Delta *delta) {
             buf = (char*)safe_realloc(buf, cap);
         }
 
-        len += sprintf(buf + len, "|%c|%d|%d|%d|", t->type, t->pos_line, t->pos_col, t->count);
+        len += snprintf(buf + len, cap - len, "|%c|%d|%d|%d|", t->type, t->pos_line, t->pos_col, t->count);
         
         if (t->content) {
             size_t content_len = strlen(t->content);
@@ -201,7 +201,7 @@ char* cb_serialize_delta(Delta *delta) {
                 buf = (char*)safe_realloc(buf, cap);
             }
             for (size_t j = 0; t->content[j]; j++) {
-                len += sprintf(buf + len, "%02x", (unsigned char)t->content[j]);
+                len += snprintf(buf + len, cap - len, "%02x", (unsigned char)t->content[j]);
             }
         }
     }
@@ -318,7 +318,7 @@ char* cb_serialize_token_stream(CB_TokenStream *stream) {
     char *buf = (char*)malloc(cap);
     size_t len = 0;
 
-    len += sprintf(buf + len, "%zu", stream->count);
+    len += snprintf(buf + len, cap - len, "%zu", stream->count);
 
     for (size_t i = 0; i < stream->count; i++) {
         CB_SerializedToken *st = &stream->tokens[i];
@@ -331,16 +331,16 @@ char* cb_serialize_token_stream(CB_TokenStream *stream) {
             buf = (char*)safe_realloc(buf, cap);
         }
 
-        len += sprintf(buf + len, "|%d|%zu|%zu|%d|%c|", (int)st->type, st->pos, st->length, st->identifier_id, (char)st->severity);
+        len += snprintf(buf + len, cap - len, "|%d|%zu|%zu|%d|%c|", (int)st->type, st->pos, st->length, st->identifier_id, (char)st->severity);
         
         if (st->message_code) {
             for (size_t j = 0; st->message_code[j]; j++)
-                len += sprintf(buf + len, "%02x", (unsigned char)st->message_code[j]);
+                len += snprintf(buf + len, cap - len, "%02x", (unsigned char)st->message_code[j]);
         }
-        len += sprintf(buf + len, "|");
+        len += snprintf(buf + len, cap - len, "|");
         if (st->message) {
             for (size_t j = 0; st->message[j]; j++)
-                len += sprintf(buf + len, "%02x", (unsigned char)st->message[j]);
+                len += snprintf(buf + len, cap - len, "%02x", (unsigned char)st->message[j]);
         }
     }
     return buf;
@@ -405,15 +405,16 @@ char* cb_serialize_initial_load(InitialLoad *load) {
         utf8_len++; /* \n */
     }
 
-    char *buf = (char*)malloc(128 + strlen(load->unique_document_id) * 2 + utf8_len * 2);
+    size_t cap = 128 + strlen(load->unique_document_id) * 2 + utf8_len * 2;
+    char *buf = (char*)malloc(cap);
     size_t len = 0;
-    len += sprintf(buf + len, "%zu|%zu|", load->change_version, load->line_count);
+    len += snprintf(buf + len, cap - len, "%zu|%zu|", load->change_version, load->line_count);
     
     /* unique_document_id as hex */
     for (size_t i = 0; load->unique_document_id[i]; i++)
-        len += sprintf(buf + len, "%02x", (unsigned char)load->unique_document_id[i]);
+        len += snprintf(buf + len, cap - len, "%02x", (unsigned char)load->unique_document_id[i]);
     
-    len += sprintf(buf + len, "|");
+    len += snprintf(buf + len, cap - len, "|");
 
     /* Content as hex */
     for (size_t i = 0; i < load->line_count; i++) {
@@ -423,10 +424,10 @@ char* cb_serialize_initial_load(InitialLoad *load) {
             for (size_t k = 0; k < load->lines[i].characters[j].codepoints; k++) {
                 n = utf32_to_utf8_char(load->lines[i].characters[j].character[k], u8, 4);
                 for (size_t m = 0; m < n; m++)
-                    len += sprintf(buf + len, "%02x", (unsigned char)u8[m]);
+                    len += snprintf(buf + len, cap - len, "%02x", (unsigned char)u8[m]);
             }
         }
-        len += sprintf(buf + len, "0a"); /* '\n' */
+        len += snprintf(buf + len, cap - len, "0a"); /* '\n' */
     }
 
     return buf;

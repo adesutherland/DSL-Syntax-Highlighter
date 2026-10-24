@@ -361,7 +361,7 @@ static int ensure_winsock_initialized(void) {
 static int send_msg(SocketHandle sock, const char *msg) {
     uint32_t len = strlen(msg);
     char len_hex[9];
-    sprintf(len_hex, "%08x", len);
+    snprintf(len_hex, sizeof(len_hex), "%08x", len);
     if (send_all(sock, len_hex, 8) < 0) return -1;
     return send_all(sock, msg, len);
 }
@@ -423,8 +423,9 @@ static CB_ParseTree* socket_send_initial_load(CommunicationFunctions *comm_block
     }
 
     char *payload = cb_serialize_initial_load(initial_load);
-    char *full_req = (char*)malloc(strlen(payload) + 10);
-    sprintf(full_req, "I|%s", payload);
+    size_t full_req_size = strlen(payload) + 10;
+    char *full_req = (char*)malloc(full_req_size);
+    snprintf(full_req, full_req_size, "I|%s", payload);
     send_msg(sock, full_req);
     free(payload);
     free(full_req);
@@ -453,8 +454,9 @@ static CB_ParseTree* socket_send_delta(CommunicationFunctions *comm_block, Delta
     }
 
     char *payload = cb_serialize_delta(delta);
-    char *full_req = (char*)malloc(strlen(payload) + 10);
-    sprintf(full_req, "D|%s", payload);
+    size_t full_req_size = strlen(payload) + 10;
+    char *full_req = (char*)malloc(full_req_size);
+    snprintf(full_req, full_req_size, "D|%s", payload);
     send_msg(sock, full_req);
     free(payload);
     free(full_req);
@@ -483,8 +485,9 @@ static CB_ParseTree* socket_send_hypothesis(CommunicationFunctions *comm_block, 
     }
 
     char *payload = cb_serialize_delta(delta);
-    char *full_req = (char*)malloc(strlen(payload) + 10);
-    sprintf(full_req, "H|%s", payload);
+    size_t full_req_size = strlen(payload) + 10;
+    char *full_req = (char*)malloc(full_req_size);
+    snprintf(full_req, full_req_size, "H|%s", payload);
     send_msg(sock, full_req);
     free(payload);
     free(full_req);
@@ -601,8 +604,9 @@ void cb_start_server(CodeBuffer *parser_cb, const char *address, int port) {
             if (req[0] == 'C') {
                 const char *config = cb_get_ep_config_string();
                 if (!config) config = "";
-                char *resp = malloc(strlen(config) + 10);
-                sprintf(resp, "C|%s", config);
+                size_t resp_size = strlen(config) + 10;
+                char *resp = malloc(resp_size);
+                snprintf(resp, resp_size, "C|%s", config);
                 send_msg(new_socket, resp);
                 free(resp);
                 free(req);
@@ -852,7 +856,7 @@ static int read_all_interruptible(StdioCommsData *sd, int fd, char *buf, size_t 
 static int stdio_send_msg(int fd, const char *msg) {
     uint32_t len = strlen(msg);
     char len_hex[9];
-    sprintf(len_hex, "%08x", len);
+    snprintf(len_hex, sizeof(len_hex), "%08x", len);
     if (write_all(fd, len_hex, 8) < 0) return -1;
     return write_all(fd, msg, len);
 }
@@ -878,7 +882,7 @@ static int stdio_send_client_msg(StdioCommsData *sd, const char *msg) {
 
     if (!sd || sd->write_fd < 0 || sd->shutting_down) return -1;
     len = strlen(msg);
-    sprintf(len_hex, "%08x", len);
+    snprintf(len_hex, sizeof(len_hex), "%08x", len);
     if (write_all_interruptible(sd, sd->write_fd, len_hex, 8) < 0) return -1;
     return write_all_interruptible(sd, sd->write_fd, msg, len);
 }
@@ -950,8 +954,9 @@ static void set_fd_nonblocking(int fd) {
 static CB_ParseTree* stdio_send_initial_load(CommunicationFunctions *comm_block, InitialLoad *initial_load) {
     StdioCommsData *sd = (StdioCommsData*)comm_block->comms_data;
     char *payload = cb_serialize_initial_load(initial_load);
-    char *full_req = (char*)malloc(strlen(payload) + 10);
-    sprintf(full_req, "I|%s", payload);
+    size_t full_req_size = strlen(payload) + 10;
+    char *full_req = (char*)malloc(full_req_size);
+    snprintf(full_req, full_req_size, "I|%s", payload);
     int send_rc = stdio_send_client_msg(sd, full_req);
     free(payload);
     free(full_req);
@@ -970,8 +975,9 @@ static CB_ParseTree* stdio_send_initial_load(CommunicationFunctions *comm_block,
 static CB_ParseTree* stdio_send_delta(CommunicationFunctions *comm_block, Delta *delta) {
     StdioCommsData *sd = (StdioCommsData*)comm_block->comms_data;
     char *payload = cb_serialize_delta(delta);
-    char *full_req = (char*)malloc(strlen(payload) + 10);
-    sprintf(full_req, "D|%s", payload);
+    size_t full_req_size = strlen(payload) + 10;
+    char *full_req = (char*)malloc(full_req_size);
+    snprintf(full_req, full_req_size, "D|%s", payload);
     int send_rc = stdio_send_client_msg(sd, full_req);
     free(payload);
     free(full_req);
@@ -990,8 +996,9 @@ static CB_ParseTree* stdio_send_delta(CommunicationFunctions *comm_block, Delta 
 static CB_ParseTree* stdio_send_hypothesis(CommunicationFunctions *comm_block, Delta *delta) {
     StdioCommsData *sd = (StdioCommsData*)comm_block->comms_data;
     char *payload = cb_serialize_delta(delta);
-    char *full_req = (char*)malloc(strlen(payload) + 10);
-    sprintf(full_req, "H|%s", payload);
+    size_t full_req_size = strlen(payload) + 10;
+    char *full_req = (char*)malloc(full_req_size);
+    snprintf(full_req, full_req_size, "H|%s", payload);
     int send_rc = stdio_send_client_msg(sd, full_req);
     free(payload);
     free(full_req);
@@ -1116,8 +1123,9 @@ void cb_start_stdio_server(CodeBuffer *parser_cb) {
         if (req[0] == 'C') {
             const char *config = cb_get_ep_config_string();
             if (!config) config = "";
-            char *resp = malloc(strlen(config) + 10);
-            sprintf(resp, "C|%s", config);
+            size_t resp_size = strlen(config) + 10;
+            char *resp = malloc(resp_size);
+            snprintf(resp, resp_size, "C|%s", config);
             stdio_send_msg(STDOUT_FILENO, resp);
             free(resp);
             free(req);
