@@ -32,12 +32,33 @@ Requests are prefixed with a type marker:
   - Format: `H|2|hex_doc_id|base_version|hypothesis_version|hex_overlay_id|transaction_count|type|line|col|count|hex_content|...`
   - The parser applies the transactions to a scratch copy and returns a token stream without changing the committed document mirror.
   - Editors should discard hypothesis responses whose `base_version` no longer matches the real buffer.
-  - Transaction Types: `a` (Add Codepoints), `d` (Delete Codepoints), `L` (Add Line), `l` (Delete Line), `J` (Join Lines), `S` (Split Line).
+  - Transaction Types: `a` (Add Line), `b` (Delete Line), `c` (Add Codepoints), `d` (Delete Codepoints), `e` (Join Lines), `f` (Split Line). These are the values of `TransactionType` in `dslsyntax_common.h`; each transaction serializes its type, line, column, count and hex content.
 
 ### 2.2 Parser -> Editor (Response)
-The response is always a serialized **Token Stream** representing the updated parse tree.
+The parse response is a serialized **Token Stream** representing the updated parse tree.
 - Format: `token_count|type|pos|len|identifier_id|severity|hex_msg_code|hex_msg|...`
 - `pos` and `len` are codepoint offsets/counts using the position model above.
+
+There is no document, revision or overlay envelope in this response. The current
+transports associate replies with requests by their ordered exchange; callers
+must preserve that association. A rejected request can produce the empty stream
+`0`, which is not a structured error response. Concurrent or out-of-order
+responses require an explicitly agreed protocol extension.
+
+For a container, `TREE_DOWN` carries its position, length, identifier and
+diagnostic attributes. The immediately following record supplies the actual
+container type. `TREE_UP` closes it at its end position. Putting diagnostic or
+range fields only on the type record loses them during C tree reconstruction.
+
+### 2.3 Emergency Parser Configuration
+
+The client sends `C|EP` to request emergency-parser configuration. The response
+is `C|` followed by the parser's configuration text; an empty `C|` supplies no
+custom rules. This exchange is ordered like other requests but does not create
+or edit a document. Configuration can contain raw newlines, unlike the
+hex-encoded source and diagnostic fields in parse traffic. A transport that
+implements only the ASCII/hex subset must return empty configuration and must
+not claim general binary-STDIO support from that subset alone.
 
 ## 3. Token Types
 Tokens are used for both lexical highlighting and structural markers.

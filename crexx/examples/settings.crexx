@@ -1,0 +1,74 @@
+/* MIT licence. Settings endpoint and two explicit user-validation rules. */
+options levelb
+import rxfnsb
+import llcore
+import lllanguage
+import dslshmodel
+import dslshlevel
+import dslshsession
+import dslshstdio
+import dslsh_settings
+
+settingscheck: class implements .dslshlevel..validator
+  _identifier = .int
+  _equals = .int
+  _number = .int
+  *: factory
+    arg identifier = .int, equals = .int, number = .int
+    _identifier = identifier; _equals = equals; _number = number
+    return
+  check: method = .void
+    arg source = reference .binary, tokens = reference .llcore..stream, tree = reference .llcore..tree, root = .int, output = reference .dslshlevel..validation
+    bytes = dereference source; input = dereference tokens; report = dereference output
+    i = .int; first = .int; last = .int; name = .string; text = .string
+    ok = .int; number = .int; valid = .int
+    do i = 0 to input.size() - 1
+      if input.symbol(i) <> _identifier then iterate
+      first = input.start(i); last = input.finish(i + 1)
+      name = lower((<at..binary>(first,last - first) bytes) as .string)
+      if wordpos(name,'name limit') = 0 then do
+        ok = report.diagnostic(first,last,2,'SET_UNKNOWN','Unknown setting ' || name)
+        iterate
+      end
+      id = 1
+      if name = 'limit' then id = 2
+      ok = report.refine(first,last,57,id)
+      if name <> 'limit' then iterate
+      if i + 2 >= input.size() then iterate
+      if input.symbol(i + 1) <> _equals then iterate
+      first = input.start(i + 2); last = input.finish(i + 3)
+      if input.symbol(i + 2) <> _number then do
+        ok = report.diagnostic(first,last,3,'SET_RANGE','limit must be an integer from 0 through 99')
+        iterate
+      end
+      text = (<at..binary>(first,last - first) bytes) as .string
+      valid = 1; number = 0
+      do
+        number = text as .int
+      on signal
+        valid = 0
+      end
+      if valid = 0 | number < 0 | number > 99 then
+        ok = report.diagnostic(first,last,3,'SET_RANGE','limit must be an integer from 0 through 99')
+    end
+    return
+
+main: procedure = .int
+  arg argv = .string[]
+  i = .int; ok = .int
+  do i = 1 to argv[0]
+    if argv[i] <> '-d' & argv[i] <> '--syntaxhighlight' & argv[i] <> '--stdio' then return 2
+  end
+  language = .lllanguage..definition
+  language = dslsh_settings..language()
+  mapping = .dslshlevel..profile()
+  ok = mapping.token('identifier',54); ok = mapping.token('number',40)
+  ok = mapping.token('string',39); ok = mapping.token('equals',43)
+  ok = mapping.token('separator',47)
+  ok = mapping.rule('assignment',73); ok = mapping.rule('value',74)
+  if mapping.finish(reference language) = 0 then return 2
+  checker = .settingscheck(language.tokenid('identifier'),language.tokenid('equals'),language.tokenid('number'))
+  backend = .dslshlevel..adapter(reference language,mapping,checker)
+  policy = .dslshmodel..limits()
+  server = .dslshsession..service(backend,policy)
+  return dslshstdio..run(reference server)

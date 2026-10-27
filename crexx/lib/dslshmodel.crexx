@@ -1,0 +1,311 @@
+/* MIT licence. Owned DSLSH parser results and borrowed request contracts. */
+options levelb
+namespace dslshmodel expose request result parser limits positions
+import rxfnsb
+
+/** A callback sees one immutable source snapshot; borrowed arguments cannot escape. */
+parser: interface
+  parse: method = .dslshmodel..result
+    arg source = reference .binary, context = reference .dslshmodel..request
+
+/** Identity belongs to the request service, not to the legacy token wire reply. */
+request: class
+  _document = .string
+  _base = .int
+  _version = .int
+  _overlay = .string
+  _hypothesis = .int
+  _positions = reference .positions
+  _haspositions = .int
+  *: factory
+    arg document = '', base = 0, version = 0, overlay = '', hypothesis = 0, ?index = reference .positions
+    _document = document; _base = base; _version = version
+    _overlay = overlay; _hypothesis = hypothesis
+    _haspositions = ?index
+    if ?index then _positions = index
+    return
+  docid: method = .string
+    return _document
+  base: method = .int
+    return _base
+  version: method = .int
+    return _version
+  overlay: method = .string
+    return _overlay
+  hypothesis: method = .int
+    return _hypothesis
+  haspositions: method = .int
+    return _haspositions
+  positions: method = reference .positions
+    if _haspositions = 0 then assembler signal 'INVALID_ARGUMENTS', 'DSLSH request has no source position index'
+    return _positions
+
+/** Explicit admission policy. These limits are resource bounds, not speed claims. */
+limits: class
+  _frame = .int
+  _source = .int
+  _documents = .int
+  _total = .int
+  _transactions = .int
+  _tokens = .int
+  _messages = .int
+  _work = .int
+  *: factory
+    arg frame = 8388608, source = 2097152, documents = 16, total = 8388608, transactions = 4096, tokens = 200000, messages = 1048576, work = 20000000
+    _frame = frame; _source = source; _documents = documents; _total = total
+    _transactions = transactions; _tokens = tokens; _messages = messages; _work = work
+    return
+  frame: method = .int
+    return _frame
+  source: method = .int
+    return _source
+  documents: method = .int
+    return _documents
+  total: method = .int
+    return _total
+  transactions: method = .int
+    return _transactions
+  tokens: method = .int
+    return _tokens
+  messages: method = .int
+    return _messages
+  work: method = .int
+    return _work
+
+/**
+ * Exact UTF-8/codepoint boundaries. The constructor borrows source only while
+ * running; retained offsets own no source reference. Embedded NUL is refused
+ * because the interoperating C middleware uses terminating-NUL strings.
+ */
+positions: class
+  _status = .int
+  _error = .string
+  _bytes = .int
+  _count = .int
+  _ascii = .int
+  _offsets = .int[]
+  *: factory
+    arg source = reference .binary, limit = 2097152, work = 20000000
+    _status = 0; _error = ''; _bytes = 0; _count = 0; _ascii = 1
+    do
+      bytes = dereference source
+      _bytes = <blen>(bytes)
+      if limit < 0 | work < 0 | _bytes > limit | _bytes > work then do
+        _status = 1; _error = 'DSLSH_LIMIT: source/index budget'; return
+      end
+      at = 0
+      do while at < _bytes
+        start = at; first = <at..u8>(at) bytes; extra = 0; scalar = first; minimum = 0
+        if first = 0 then do
+          _status = 1; _error = 'DSLSH_UTF8: embedded NUL'; return
+        end
+        if first >= 128 then do
+          if _ascii then do
+            do prior = 0 to _count
+              _offsets[prior + 1] = prior
+            end
+            _ascii = 0
+          end
+          if first >= 194 & first <= 223 then do
+            extra = 1; scalar = first - 192; minimum = 128
+          end
+          else if first >= 224 & first <= 239 then do
+            extra = 2; scalar = first - 224; minimum = 2048
+          end
+          else if first >= 240 & first <= 244 then do
+            extra = 3; scalar = first - 240; minimum = 65536
+          end
+          else do
+            _status = 1; _error = 'DSLSH_UTF8: invalid leading byte'; return
+          end
+        end
+        at = at + 1
+        do i = 1 to extra
+          if at >= _bytes then do
+            _status = 1; _error = 'DSLSH_UTF8: truncated scalar'; return
+          end
+          continuation = <at..u8>(at) bytes
+          if continuation < 128 | continuation > 191 then do
+            _status = 1; _error = 'DSLSH_UTF8: invalid continuation'; return
+          end
+          scalar = scalar * 64 + continuation - 128; at = at + 1
+        end
+        if scalar < minimum | scalar > 1114111 | (scalar >= 55296 & scalar <= 57343) then do
+          _status = 1; _error = 'DSLSH_UTF8: invalid scalar'; return
+        end
+        _count = _count + 1
+        if _ascii = 0 then _offsets[_count + 1] = at
+      end
+    on signal
+      _status = 1; _error = 'DSLSH_RESOURCE: cannot build positions'
+    end
+    return
+  status: method = .int
+    return _status
+  error: method = .string
+    return _error
+  count: method = .int
+    return _count
+  bytes: method = .int
+    return _bytes
+  byte: method = .int
+    arg point = .int
+    if _status <> 0 | point < 0 | point > _count then return -1
+    if _ascii then return point
+    return _offsets[point + 1]
+  point: method = .int
+    arg byte = .int
+    if _status <> 0 | byte < 0 | byte > _bytes then return -1
+    if _ascii then return byte
+    low = 0; high = _count
+    do while low <= high
+      middle = low + (high - low) <idiv> 2
+      offset = _offsets[middle + 1]
+      if offset = byte then return middle
+      if offset < byte then low = middle + 1
+      else high = middle - 1
+    end
+    return -1
+
+/**
+ * Owned flat tree builder. begin/close add wire structural markers. finish
+ * admits one root, exact leaf coverage and ordered nesting in one stack pass.
+ * A zero-length EOF leaf contributes no coverage. Empty sources use a zero-
+ * length file root; place their diagnostics on that root.
+ */
+result: class
+  _types = .int[]
+  _positions = .int[]
+  _lengths = .int[]
+  _identifiers = .int[]
+  _severities = .int[]
+  _codes = .string[]
+  _messages = .string[]
+  _count = .int
+  _max_tokens = .int
+  _max_messages = .int
+  _message_bytes = .int
+  _status = .int
+  _error = .string
+  _sealed = .int
+  _extent = .int
+  *: factory
+    arg max_tokens = 200000, max_messages = 1048576
+    _count = 0; _max_tokens = max_tokens; _max_messages = max_messages
+    _message_bytes = 0; _status = 1; _error = ''; _sealed = 0; _extent = -1
+    return
+  fail: method = .int
+    arg message = .string
+    if _sealed then return 0
+    if _error = '' then _error = message
+    _status = 2
+    return 0
+  record: method = .int
+    arg type = .int, pos = .int, length = .int, identifier = 0, severity = 0, code = '', message = ''
+    if _sealed | _error <> '' then return 0
+    if _count >= _max_tokens then return fail('DSLSH_LIMIT: result records')
+    if pos < 0 | length < 0 | severity < 0 | severity > 3 then return fail('DSLSH_RESULT: invalid record')
+    if identifier < -2147483648 | identifier > 2147483647 then return fail('DSLSH_RESULT: identifier range')
+    code_bytes = code as .binary; message_bytes = message as .binary
+    amount = <blen>(code_bytes) + <blen>(message_bytes)
+    if amount > _max_messages - _message_bytes then return fail('DSLSH_LIMIT: result messages')
+    if rxfnsb..pos(d2c(0),code) > 0 | rxfnsb..pos(d2c(0),message) > 0 then return fail('DSLSH_RESULT: NUL message')
+    _count = _count + 1; _message_bytes = _message_bytes + amount
+    _types[_count] = type; _positions[_count] = pos; _lengths[_count] = length
+    _identifiers[_count] = identifier; _severities[_count] = severity
+    _codes[_count] = code; _messages[_count] = message
+    return 1
+  begin: method = .int
+    arg type = .int, pos = .int, length = .int, identifier = 0, severity = 0, code = '', message = ''
+    if type < 70 | type >= 100 then return fail('DSLSH_RESULT: container type')
+    if _max_tokens - _count < 2 then return fail('DSLSH_LIMIT: result records')
+    if record(100,pos,length,identifier,severity,code,message) = 0 then return 0
+    return record(type,pos,length,identifier,severity)
+  leaf: method = .int
+    arg type = .int, pos = .int, length = .int, identifier = 0, severity = 0, code = '', message = ''
+    if type < 33 | type >= 70 then return fail('DSLSH_RESULT: leaf type')
+    return record(type,pos,length,identifier,severity,code,message)
+  close: method = .int
+    return record(101,0,0)
+  finish: method = .int
+    arg codepoint_length = .int
+    if _sealed then return _status = 0 & _extent = codepoint_length
+    if _error <> '' then return 0
+    if codepoint_length < 0 then return fail('DSLSH_RESULT: source extent')
+    first = .int; extent = .int; down = .int
+    ends = .int[]; depth = 0; roots = 0; cursor = 0; eof = 0; i = 1
+    do while i <= _count
+      kind = _types[i]
+      if kind = 100 then do
+        down = i; first = _positions[i]; extent = _lengths[i]
+        i = i + 1
+        if i > _count then return fail('DSLSH_RESULT: missing container')
+        kind = _types[i]
+        if _positions[i] <> first | _lengths[i] <> extent | _identifiers[i] <> _identifiers[down] | _severities[i] <> _severities[down] | _codes[i] <> '' | _messages[i] <> '' then return fail('DSLSH_RESULT: container marker')
+        if kind < 70 | kind >= 100 | first <> cursor then return fail('DSLSH_RESULT: container order')
+        if extent > codepoint_length - first then return fail('DSLSH_RESULT: container extent')
+        if depth = 0 then do
+          roots = roots + 1
+          if roots <> 1 | kind <> 71 | first <> 0 | extent <> codepoint_length then return fail('DSLSH_RESULT: file root')
+        end
+        else if extent > ends[depth] - first then return fail('DSLSH_RESULT: nested extent')
+        depth = depth + 1; ends[depth] = first + extent
+      end
+      else if kind = 101 then do
+        if depth = 0 then return fail('DSLSH_RESULT: unmatched close')
+        if cursor <> ends[depth] then return fail('DSLSH_RESULT: incomplete container')
+        _positions[i] = cursor
+        depth = depth - 1
+      end
+      else do
+        if depth = 0 | kind < 33 | kind >= 70 then return fail('DSLSH_RESULT: unexpected record')
+        first = _positions[i]; extent = _lengths[i]
+        if first <> cursor | extent > ends[depth] - first then return fail('DSLSH_RESULT: leaf overlap/gap')
+        if extent = 0 then do
+          if kind <> 34 | first <> codepoint_length | eof then return fail('DSLSH_RESULT: empty leaf')
+          eof = 1
+        end
+        else if eof then return fail('DSLSH_RESULT: token after EOF')
+        cursor = cursor + extent
+      end
+      i = i + 1
+    end
+    if depth <> 0 | roots <> 1 | cursor <> codepoint_length then return fail('DSLSH_RESULT: incomplete tree')
+    _sealed = 1; _status = 0; _extent = codepoint_length
+    return 1
+  status: method = .int
+    return _status
+  error: method = .string
+    return _error
+  count: method = .int
+    return _count
+  messagebytes: method = .int
+    return _message_bytes
+  type: method = .int
+    arg i = .int
+    if i < 1 | i > _count then return 0
+    return _types[i]
+  pos: method = .int
+    arg i = .int
+    if i < 1 | i > _count then return 0
+    return _positions[i]
+  length: method = .int
+    arg i = .int
+    if i < 1 | i > _count then return 0
+    return _lengths[i]
+  identifier: method = .int
+    arg i = .int
+    if i < 1 | i > _count then return 0
+    return _identifiers[i]
+  severity: method = .int
+    arg i = .int
+    if i < 1 | i > _count then return 0
+    return _severities[i]
+  code: method = .string
+    arg i = .int
+    if i < 1 | i > _count then return ''
+    return _codes[i]
+  message: method = .string
+    arg i = .int
+    if i < 1 | i > _count then return ''
+    return _messages[i]

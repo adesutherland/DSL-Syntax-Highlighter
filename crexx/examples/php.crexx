@@ -1,0 +1,50 @@
+/* MIT licence. Highlight only the maintained CREXX example PHP grammar subset. */
+options levelb
+import rxfnsb
+import lllanguage
+import dslshmodel
+import dslshlevel
+import dslshsession
+import dslshstdio
+import phpgrammar
+
+main: procedure = .int
+  arg argv = .string[]
+  i = .int; ok = .int
+  do i = 1 to argv[0]
+    if argv[i] <> '-d' & argv[i] <> '--syntaxhighlight' & argv[i] <> '--stdio' then return 2
+  end
+  language = .lllanguage..definition
+  language = phpgrammar..language()
+  mapping = .dslshlevel..profile()
+  ok = mapping.token('phpopen',37); ok = mapping.token('phpclose',37)
+  ok = mapping.token('variable',54); ok = mapping.token('identifier',54)
+  ok = mapping.token('number',40); ok = mapping.token('string',39)
+  ok = mapping.token('separator',47); ok = mapping.token('assign',43)
+  arithmetic = 'plus minus times divide concat'
+  do i = 1 to words(arithmetic)
+    ok = mapping.token(word(arithmetic,i),44)
+  end
+  logical = 'equals notequals lt gt le ge'
+  do i = 1 to words(logical)
+    ok = mapping.token(word(logical,i),45)
+  end
+  punctuation = 'open close lbrace rbrace comma lbracket rbracket arrow'
+  do i = 1 to words(punctuation)
+    ok = mapping.token(word(punctuation,i),46)
+  end
+  keywords = 'ifword elseword whileword echoword countword foreachword asword functionword returnword'
+  do i = 1 to words(keywords)
+    ok = mapping.token(word(keywords,i),41)
+  end
+  statements = 'assignment.statement echo.statement if.statement while.statement foreach.statement return.statement'
+  do i = 1 to words(statements)
+    ok = mapping.rule(word(statements,i),73)
+  end
+  ok = mapping.rule('block',72); ok = mapping.rule('function.declaration',77)
+  ok = mapping.rule('function.call',74); ok = mapping.rule('group.value',74)
+  if mapping.finish(reference language) = 0 then return 2
+  backend = .dslshlevel..adapter(reference language,mapping)
+  policy = .dslshmodel..limits()
+  server = .dslshsession..service(backend,policy)
+  return dslshstdio..run(reference server)

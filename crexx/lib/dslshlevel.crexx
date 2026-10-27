@@ -1,0 +1,552 @@
+/* MIT licence. Grammar-driven DSLSH projection; no session or transport state. */
+options levelb
+namespace dslshlevel expose profile validation validator adapter
+import rxfnsb
+import dslshmodel
+import llcore
+import llcomments
+import lllanguage
+import lllimits
+
+/** Resolve declared categories once; a profile belongs to one anchored definition. */
+profile: class
+  _token_names = .string[]
+  _token_kinds = .int[]
+  _rule_names = .string[]
+  _rule_kinds = .int[]
+  _resolved = .int[]
+  _bound = .int[]
+  _owner = reference .lllanguage..definition
+  _ready = .int
+  _parser = .int
+  _error = .string
+  *: factory
+    _ready = 0; _parser = 0; _error = ''
+    return
+  token: method = .int
+    arg name = .string, kind = .int
+    i = .int
+    if _ready | _error <> '' then return 0
+    if name = '' | kind < 33 | kind >= 70 | _token_names[0] >= 256 then do
+      _error = 'DSLSH_PROFILE: invalid token category or mapping limit'; return 0
+    end
+    do i = 1 to _token_names[0]
+      if name == _token_names[i] then do
+        _error = 'DSLSH_PROFILE: duplicate token ' || name; return 0
+      end
+    end
+    i = _token_names[0] + 1; _token_names[i] = name; _token_kinds[i] = kind
+    return 1
+  rule: method = .int
+    arg name = .string, kind = .int
+    i = .int
+    if _ready | _error <> '' then return 0
+    if name = '' | kind < 70 | kind >= 100 | _rule_names[0] >= 128 then do
+      _error = 'DSLSH_PROFILE: invalid rule category or mapping limit'; return 0
+    end
+    do i = 1 to _rule_names[0]
+      if name == _rule_names[i] then do
+        _error = 'DSLSH_PROFILE: duplicate rule ' || name; return 0
+      end
+    end
+    i = _rule_names[0] + 1; _rule_names[i] = name; _rule_kinds[i] = kind
+    return 1
+  finish: method = .int
+    arg owner = reference .lllanguage..definition
+    i = .int; j = .int
+    if _ready | _error <> '' then return 0
+    if <refvalid>(owner) = 0 then do
+      _error = 'DSLSH_PROFILE: expired definition'; return 0
+    end
+    language = dereference owner
+    if initialized(language) = 0 then do
+      _error = 'DSLSH_PROFILE: absent definition'; return 0
+    end
+    if language.hasparser() & language.backend() <> 'lr1' then do
+      _error = 'DSLSH_PROFILE: borrowed adapter supports scanner/LR1 definitions'; return 0
+    end
+    count = language.tokencount()
+    do i = 1 to count
+      _resolved[i] = 36; _bound[i] = 0
+    end
+    do i = 1 to _token_names[0]
+      id = language.tokenid(_token_names[i])
+      if id < 0 | id >= count then do
+        _error = 'DSLSH_PROFILE: unknown token ' || _token_names[i]; return 0
+      end
+      if _bound[id + 1] then do
+        _error = 'DSLSH_PROFILE: repeated token identity'; return 0
+      end
+      _resolved[id + 1] = _token_kinds[i]; _bound[id + 1] = 1
+    end
+    if _rule_names[0] > 0 then do
+      /* Generated LR definitions retain grammar metadata in their tables.
+       * These owned reads happen once during profile admission, never per edit. */
+      tables = language.tables(); layout = tables.grammar()
+      rule_count = layout.nonterminals() - 1
+      do i = 1 to _rule_names[0]
+        found = 0
+        do j = 1 to rule_count
+          if tables.symbolkind(j) <> 5 then iterate
+          if tables.symbollabel(j) == _rule_names[i] then do; found = 1; leave; end
+        end
+        if found = 0 then do
+          _error = 'DSLSH_PROFILE: unknown rule ' || _rule_names[i]; return 0
+        end
+      end
+    end
+    _owner = owner; _parser = language.hasparser(); _ready = 1
+    return 1
+  belongs: method = .int
+    arg owner = reference .lllanguage..definition
+    if _ready = 0 | <refvalid>(_owner) = 0 | <refvalid>(owner) = 0 then return 0
+    return _owner <refsame> owner
+  tokenkind: method = .int
+    arg id = .int
+    if id < 0 | id >= _resolved[0] then return 36
+    return _resolved[id + 1]
+  rulekind: method = .int
+    arg name = .string
+    do i = 1 to _rule_names[0]
+      if name == _rule_names[i] then return _rule_kinds[i]
+    end
+    return 0
+  hasparser: method = .int
+    return _parser
+  error: method = .string
+    return _error
+
+/** Trusted validation is explicit and clean-only; borrowed inputs cannot escape. */
+validator: interface
+  check: method = .void
+    arg source = reference .binary, tokens = reference .llcore..stream, tree = reference .llcore..tree, root = .int, output = reference .dslshlevel..validation
+
+/** Owned, bounded semantic diagnostics and exact-token refinements. */
+validation: class
+  _first = .int[]
+  _last = .int[]
+  _severity = .int[]
+  _code = .string[]
+  _message = .string[]
+  _rfirst = .int[]
+  _rlast = .int[]
+  _rkind = .int[]
+  _rid = .int[]
+  _bytes = .int
+  _limit = .int
+  _messages = .int
+  _used = .int
+  _error = .string
+  *: factory
+    arg bytes = .int, limit = 256, messages = 1048576
+    _bytes = bytes; _limit = limit; _messages = messages; _used = 0; _error = ''
+    if bytes < 0 | limit < 1 | messages < 0 then _error = 'DSLSH_VALIDATION: invalid limits'
+    return
+  diagnostic: method = .int
+    arg first = .int, last = .int, severity = .int, code = .string, message = .string
+    if _error <> '' then return 0
+    if first < 0 | last < first | last > _bytes | severity < 1 | severity > 3 then do
+      _error = 'DSLSH_VALIDATION: invalid diagnostic'; return 0
+    end
+    if _first[0] + _rfirst[0] >= _limit then do
+      _error = 'DSLSH_LIMIT: validation records'; return 0
+    end
+    code_bytes = code as .binary; message_bytes = message as .binary
+    amount = <blen>(code_bytes) + <blen>(message_bytes)
+    if amount > _messages - _used then do
+      _error = 'DSLSH_LIMIT: validation messages'; return 0
+    end
+    i = _first[0] + 1
+    _first[i] = first; _last[i] = last; _severity[i] = severity; _code[i] = code; _message[i] = message
+    _used = _used + amount
+    return 1
+  refine: method = .int
+    arg first = .int, last = .int, kind = .int, identifier = 0
+    if _error <> '' then return 0
+    if first < 0 | last <= first | last > _bytes | kind < 33 | kind >= 70 then do
+      _error = 'DSLSH_VALIDATION: invalid refinement'; return 0
+    end
+    if _first[0] + _rfirst[0] >= _limit then do
+      _error = 'DSLSH_LIMIT: validation records'; return 0
+    end
+    i = _rfirst[0] + 1
+    _rfirst[i] = first; _rlast[i] = last; _rkind[i] = kind; _rid[i] = identifier
+    return 1
+  diagnostics: method = .int
+    return _first[0]
+  refinements: method = .int
+    return _rfirst[0]
+  first: method = .int
+    arg i = .int
+    return _first[i]
+  last: method = .int
+    arg i = .int
+    return _last[i]
+  severity: method = .int
+    arg i = .int
+    return _severity[i]
+  code: method = .string
+    arg i = .int
+    return _code[i]
+  message: method = .string
+    arg i = .int
+    return _message[i]
+  refinefirst: method = .int
+    arg i = .int
+    return _rfirst[i]
+  refinelast: method = .int
+    arg i = .int
+    return _rlast[i]
+  refinekind: method = .int
+    arg i = .int
+    return _rkind[i]
+  refineid: method = .int
+    arg i = .int
+    return _rid[i]
+  error: method = .string
+    return _error
+
+/** A configured adapter borrows one definition; it never owns a session. */
+adapter: class implements .dslshmodel..parser
+  _language = reference .lllanguage..definition
+  _profile = .profile
+  _validator = .validator
+  _hasvalidator = .int
+  _work = .int
+  _entries = .int
+  _error = .string
+  *: factory
+    arg language = reference .lllanguage..definition, mapping = .profile, ?checker = .validator, work = 20000000, entries = 200000
+    _language = language; _profile = mapping; _hasvalidator = ?checker
+    if ?checker then _validator = checker
+    _work = work; _entries = entries; _error = mapping.error()
+    if work < 1 | entries < 1 | mapping.belongs(language) = 0 then _error = 'DSLSH_PROFILE: invalid adapter or definition owner'
+    return
+  parse: method = .dslshmodel..result
+    arg source = reference .binary, context = reference .dslshmodel..request
+    ok = .int; status = .int
+    out = .dslshmodel..result(_entries)
+    if _error <> '' | <refvalid>(_language) = 0 then do
+      ok = out.fail('DSLSH_PROFILE: unavailable adapter/definition'); return out
+    end
+    bytes = dereference source; identity = dereference context
+    local_positions = .dslshmodel..positions
+    positions_ref = reference .dslshmodel..positions
+    if identity.haspositions() then positions_ref = identity.positions()
+    else do
+      local_positions = .dslshmodel..positions(source,2097152,_work)
+      positions_ref = reference local_positions
+    end
+    positions = dereference positions_ref
+    if positions.status() <> 0 then do
+      ok = out.fail(positions.error()); return out
+    end
+    policy = .lllimits..policy()
+    ok = policy.set('source.bytes',2097152); ok = policy.set('scan.work',_work)
+    ok = policy.set('parse.work',_work); ok = policy.set('tree.entries',_entries)
+    request = .lllanguage..request.borrowed(_language,bytes,policy)
+    ok = request.capturetrivia(_entries)
+    hasparser = _profile.hasparser()
+    if hasparser then status = request.parse()
+    else status = request.lex()
+    if status = 2 | status = 3 then do
+      ok = out.fail(request.error()); return out
+    end
+    tokens = request.tokens(); trivia = request.trivia()
+    tree = .llcore..tree; root = 0
+    checks = .validation(positions.bytes())
+    if status = 0 & hasparser then do
+      tree = request.tree(); root = request.root()
+    end
+    if status <> 0 then do
+      ok = checks.diagnostic(request.offset(),request.offset(),3,'L_INPUT',request.error())
+    end
+    else if root > 0 & _hasvalidator then do
+      call _validator.check(source,reference tokens,reference tree,root,reference checks)
+    end
+    if checks.error() <> '' then do; ok = out.fail(checks.error()); return out; end
+    renderer = .render(source,reference tokens,reference trivia,reference tree,root,reference _profile,positions_ref,reference checks,reference out,_work,_entries)
+    ok = renderer.run()
+    return out
+
+/* Call-local renderer. Every reference points to an owner anchored by parse(). */
+render: class
+  _source = reference .binary
+  _tokens = reference .llcore..stream
+  _trivia = reference .llcomments..regions
+  _tree = reference .llcore..tree
+  _profile = reference .profile
+  _positions = reference .dslshmodel..positions
+  _validation = reference .validation
+  _output = reference .dslshmodel..result
+  _root = .int
+  _fuel = .int
+  _limit = .int
+  _first = .int[]
+  _last = .int[]
+  _kind = .int[]
+  _id = .int[]
+  _severity = .int[]
+  _code = .string[]
+  _message = .string[]
+  _count = .int
+  _cursor = .int
+  _segment = .int
+  _empty_severity = .int
+  _empty_code = .string
+  _empty_message = .string
+  _events = .int[]
+  _diagfirst = .int[]
+  _diaglast = .int[]
+  _error = .string
+  *: factory
+    arg source = reference .binary, tokens = reference .llcore..stream, trivia = reference .llcomments..regions, tree = reference .llcore..tree, root = .int, mapping = reference .profile, positions = reference .dslshmodel..positions, checks = reference .validation, output = reference .dslshmodel..result, work = .int, entries = .int
+    _source = source; _tokens = tokens; _trivia = trivia; _tree = tree; _root = root
+    _profile = mapping; _positions = positions; _validation = checks; _output = output
+    _fuel = work; _limit = entries; _count = 0; _cursor = 0; _segment = 1; _error = ''
+    _empty_severity = 0; _empty_code = ''; _empty_message = ''
+    return
+  events: method = .int
+    checks = dereference _validation; positions = dereference _positions
+    i = .int; j = .int; first = .int; last = .int; point = .int
+    do i = 1 to checks.diagnostics()
+      _fuel = _fuel - 1
+      if _fuel < 0 then do; _error = 'DSLSH_LIMIT: diagnostic events'; return 0; end
+      first = checks.first(i); last = checks.last(i)
+      point = positions.point(first)
+      if point < 0 | positions.point(last) < 0 then do
+        _error = 'DSLSH_RANGE: diagnostic boundary splits UTF-8'; return 0
+      end
+      if first = last & positions.count() > 0 then do
+        if first = positions.bytes() then first = positions.byte(point - 1)
+        else last = positions.byte(point + 1)
+      end
+      _diagfirst[i] = first; _diaglast[i] = last
+      if first = last then iterate
+      if _events[0] > 510 then do; _error = 'DSLSH_LIMIT: diagnostic boundaries'; return 0; end
+      _events[_events[0] + 1] = first; _events[_events[0] + 1] = last
+    end
+    /* At most two events for each of the 256 bounded collector diagnostics. */
+    do i = 2 to _events[0]
+      value = _events[i]; j = i - 1
+      do while j >= 1
+        _fuel = _fuel - 1
+        if _fuel < 0 then do; _error = 'DSLSH_LIMIT: diagnostic ordering work'; return 0; end
+        if _events[j] <= value then leave
+        _events[j + 1] = _events[j]; j = j - 1
+      end
+      _events[j + 1] = value
+    end
+    return 1
+  segments: method = .int
+    source = dereference _source; tokens = dereference _tokens; trivia = dereference _trivia
+    mapping = dereference _profile; checks = dereference _validation
+    positions = dereference _positions
+    extent = positions.bytes(); total = tokens.size(); comments = trivia.size()
+    if total > _limit | total > _fuel then do
+      _error = 'DSLSH_LIMIT: token projection storage/work'; return 0
+    end
+    _fuel = _fuel - total
+    refined = .int[]; identifiers = .int[]
+    i = .int; low = .int; high = .int; middle = .int; first = .int; last = .int
+    do i = 1 to total
+      refined[i] = 0; identifiers[i] = 0
+    end
+    do i = 1 to checks.refinements()
+      first = checks.refinefirst(i); last = checks.refinelast(i)
+      low = 0; high = total - 1; found = -1
+      do while low <= high
+        _fuel = _fuel - 1
+        if _fuel < 0 then do; _error = 'DSLSH_LIMIT: projection work'; return 0; end
+        middle = low + (high - low) <idiv> 2
+        if tokens.start(middle) < first then low = middle + 1
+        else if tokens.start(middle) > first then high = middle - 1
+        else do; found = middle; leave; end
+      end
+      if found < 0 then do; _error = 'DSLSH_VALIDATION: refinement is not an exact token'; return 0; end
+      if tokens.finish(found + 1) <> last | refined[found + 1] <> 0 then do
+        _error = 'DSLSH_VALIDATION: repeated or nonexact token refinement'; return 0
+      end
+      refined[found + 1] = checks.refinekind(i); identifiers[found + 1] = checks.refineid(i)
+    end
+    at = 0; token = 0; comment = 1; event = 1
+    do while at < extent
+      _fuel = _fuel - 1
+      if _fuel < 0 then do; _error = 'DSLSH_LIMIT: projection work'; return 0; end
+      do while token < total
+        if tokens.finish(token + 1) > at then leave
+        _fuel = _fuel - 1
+        if _fuel < 0 then do; _error = 'DSLSH_LIMIT: token traversal work'; return 0; end
+        token = token + 1
+      end
+      do while comment <= comments
+        if trivia.finish(comment) > at then leave
+        _fuel = _fuel - 1
+        if _fuel < 0 then do; _error = 'DSLSH_LIMIT: comment traversal work'; return 0; end
+        comment = comment + 1
+      end
+      kind = 36; identifier = 0; last = extent
+      do while event <= _events[0]
+        if _events[event] > at then do; last = min(last,_events[event]); leave; end
+        _fuel = _fuel - 1
+        if _fuel < 0 then do; _error = 'DSLSH_LIMIT: diagnostic merge work'; return 0; end
+        event = event + 1
+      end
+      if comment <= comments then do
+        if trivia.start(comment) <= at then do
+          kind = 38; last = min(last,trivia.finish(comment))
+        end
+        else last = min(last,trivia.start(comment))
+      end
+      if kind <> 38 then do
+        if token < total then do
+          if tokens.start(token) <= at then do
+            kind = mapping.tokenkind(tokens.symbol(token)); last = min(last,tokens.finish(token + 1))
+            if refined[token + 1] <> 0 then do
+              kind = refined[token + 1]; identifier = identifiers[token + 1]
+            end
+          end
+          else last = min(last,tokens.start(token))
+        end
+        if kind = 36 then do
+          /* Only actual ASCII layout is whitespace; other unclaimed text is unknown. */
+          byte = <at..u8>(at) source
+          white = byte = 9 | byte = 10 | byte = 13 | byte = 32
+          if white then kind = 33
+          point = positions.point(at)
+          if point < 0 then do; _error = 'DSLSH_RANGE: nonboundary gap'; return 0; end
+          next = positions.byte(point + 1)
+          do while next < last
+            _fuel = _fuel - 1
+            if _fuel < 0 then do; _error = 'DSLSH_LIMIT: projection work'; return 0; end
+            byte = <at..u8>(next) source
+            if (byte = 9 | byte = 10 | byte = 13 | byte = 32) <> white then leave
+            point = point + 1; next = positions.byte(point + 1)
+          end
+          last = min(last,next)
+        end
+      end
+      if last <= at | last > extent then do; _error = 'DSLSH_RANGE: nonprogressing source projection'; return 0; end
+      if positions.point(at) < 0 | positions.point(last) < 0 then do
+        _error = 'DSLSH_RANGE: token/comment boundary splits UTF-8'; return 0
+      end
+      if _count >= _limit then do; _error = 'DSLSH_LIMIT: projection records'; return 0; end
+      _count = _count + 1
+      _first[_count] = at; _last[_count] = last; _kind[_count] = kind; _id[_count] = identifier
+      _severity[_count] = 0; _code[_count] = ''; _message[_count] = ''
+      at = last
+    end
+    return 1
+  annotations: method = .int
+    checks = dereference _validation
+    i = .int; j = .int; first = .int; severity = .int; code = .string; message = .string
+    part = .string; amount = .int
+    event = 1; severity = 0; code = ''; message = ''
+    do i = 1 to max(1,_count)
+      _fuel = _fuel - 1
+      if _fuel < 0 then do; _error = 'DSLSH_LIMIT: diagnostic projection work'; return 0; end
+      first = 0
+      if _count > 0 then first = _first[i]
+      changed = _count = 0
+      do while event <= _events[0]
+        if _events[event] > first then leave
+        _fuel = _fuel - 1
+        if _fuel < 0 then do; _error = 'DSLSH_LIMIT: diagnostic merge work'; return 0; end
+        changed = 1; event = event + 1
+      end
+      if changed then do
+        severity = 0; code = ''; message = ''
+        do j = 1 to checks.diagnostics()
+          _fuel = _fuel - 1
+          if _fuel < 0 then do; _error = 'DSLSH_LIMIT: active diagnostics'; return 0; end
+          if _count > 0 then do
+            if _diagfirst[j] > first | _diaglast[j] <= first then iterate
+          end
+          part = '[' || checks.code(j) || '] ' || checks.message(j)
+          amount = 4 * (length(message) + length(part) + 1)
+          if amount > _fuel then do; _error = 'DSLSH_LIMIT: diagnostic message work'; return 0; end
+          _fuel = _fuel - amount
+          severity = max(severity,checks.severity(j))
+          if code = '' then code = checks.code(j)
+          if message <> '' then message = message || '0A'x
+          message = message || part
+        end
+      end
+      amount = 4 * (length(message) + length(code))
+      if amount > _fuel then do; _error = 'DSLSH_LIMIT: diagnostic retention work'; return 0; end
+      _fuel = _fuel - amount
+      if _count = 0 then do
+        _empty_severity = severity; _empty_code = code; _empty_message = message
+      end
+      else do
+        _severity[i] = severity; _code[i] = code; _message[i] = message
+      end
+    end
+    return 1
+  emitto: method = .int
+    arg last = .int
+    out = dereference _output; positions = dereference _positions
+    if last < _cursor then do; _error = 'DSLSH_RANGE: nonmonotonic container'; return 0; end
+    do while _segment <= _count & _cursor < last
+      finish = min(last,_last[_segment])
+      firstpoint = positions.point(_cursor); lastpoint = positions.point(finish)
+      if firstpoint < 0 | lastpoint < firstpoint then do; _error = 'DSLSH_RANGE: invalid container boundary'; return 0; end
+      if out.leaf(_kind[_segment],firstpoint,lastpoint - firstpoint,_id[_segment],_severity[_segment],_code[_segment],_message[_segment]) = 0 then do
+        _error = out.error(); return 0
+      end
+      _cursor = finish
+      if _cursor = _last[_segment] then _segment = _segment + 1
+    end
+    return _cursor = last
+  run: method = .int
+    ok = .int
+    owner_ref = reference self; owner = dereference owner_ref
+    out = dereference _output; positions = dereference _positions
+    if owner.events() = 0 then do; ok = out.fail(_error); return 0; end
+    if owner.segments() = 0 then do; ok = out.fail(_error); return 0; end
+    if owner.annotations() = 0 then do; ok = out.fail(_error); return 0; end
+    ok = out.begin(71,0,positions.count(),0,_empty_severity,_empty_code,_empty_message)
+    mapping = dereference _profile
+    stack = .int[]; depth = 0; node = .int; kind = .int; first = .int; last = .int
+    if _root > 0 then do
+      tree_ref = _tree; tree = dereference tree_ref
+      depth = 1; stack[1] = _root
+      do while depth > 0
+        _fuel = _fuel - 1
+        if _fuel < 0 then do; _error = 'DSLSH_LIMIT: named-tree projection work'; leave; end
+        node = stack[depth]; depth = depth - 1
+        if node < 0 then do
+          if owner.emitto(tree.finish(-node)) = 0 then leave
+          ok = out.close()
+          iterate
+        end
+        if tree.kind(node) = 1 then do
+          if owner.emitto(tree.finish(node)) = 0 then leave
+          iterate
+        end
+        kind = 0
+        if tree.kind(node) = 5 then do
+          /* One rule lookup has at most the fixed profile mapping bound. */
+          _fuel = _fuel - 128
+          if _fuel < 0 then do; _error = 'DSLSH_LIMIT: rule mapping work'; leave; end
+          kind = mapping.rulekind(tree.label(node))
+        end
+        first = tree.start(node); last = tree.finish(node)
+        if kind > 0 & last > first then do
+          if owner.emitto(first) = 0 then leave
+          firstpoint = positions.point(first); lastpoint = positions.point(last)
+          if firstpoint < 0 | lastpoint < firstpoint then do; _error = 'DSLSH_RANGE: invalid named-rule span'; leave; end
+          ok = out.begin(kind,firstpoint,lastpoint - firstpoint)
+          depth = depth + 1; stack[depth] = -node
+        end
+        if depth + 2 > _limit then do; _error = 'DSLSH_LIMIT: tree traversal stack'; leave; end
+        child = tree.right(node)
+        if child > 0 then do; depth = depth + 1; stack[depth] = child; end
+        child = tree.left(node)
+        if child > 0 then do; depth = depth + 1; stack[depth] = child; end
+      end
+    end
+    if _error <> '' then do; ok = out.fail(_error); return 0; end
+    if owner.emitto(positions.bytes()) = 0 then do; ok = out.fail('DSLSH_RANGE: incomplete source projection'); return 0; end
+    ok = out.close()
+    return out.finish(positions.count())

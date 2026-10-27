@@ -1,0 +1,286 @@
+/* MIT licence. Atomic ordered DSLSH parser requests, independent of transport. */
+options levelb
+namespace dslshsession expose service
+import rxfnsb
+import dslshmodel
+import dslshwire
+
+/** Private candidate line store. Only a completely admitted snapshot is committed. */
+document: class
+  _lines = .string[]
+  _bytes = .int
+  _limit = .int
+  _remaining = .int
+  _error = .string
+  *: factory
+    arg source = reference .binary, limit = 2097152, work = 20000000
+    _bytes = 0; _limit = limit; _remaining = work; _error = ''
+    bytes = dereference source
+    amount = <blen>(bytes)
+    if amount > limit | amount > _remaining | _remaining < 0 then do
+      _error = 'DSLSH_LIMIT: document source'; return
+    end
+    _remaining = _remaining - amount
+    start = 0; entry = 0
+    do i = 0 to amount - 1
+      if <at..u8>(i) bytes <> 10 then iterate
+      entry = entry + 1
+      _lines[entry] = (<at..binary>(start,i - start) bytes) as .string
+      start = i + 1
+    end
+    if start < amount then do
+      entry = entry + 1
+      _lines[entry] = (<at..binary>(start,amount - start) bytes) as .string
+      amount = amount + 1
+    end
+    if amount > limit then do
+      _error = 'DSLSH_LIMIT: logical final newline'; return
+    end
+    _bytes = amount
+    return
+  charge: method = .int
+    arg amount = .int
+    if amount < 0 | amount > _remaining then do
+      _error = 'DSLSH_LIMIT: edit work'; return 0
+    end
+    _remaining = _remaining - amount
+    return 1
+  error: method = .string
+    return _error
+  count: method = .int
+    return _lines[0]
+  bytes: method = .int
+    return _bytes
+  remaining: method = .int
+    return _remaining
+  refuse: method = .int
+    arg message = .string
+    if _error = '' then _error = message
+    return 0
+  edit: method = .int
+    arg kind = .string, line = .int, column = .int, count = .int, content = reference .binary
+    if _error <> '' then return 0
+    if line < 0 | column < 0 | count < 0 then return refuse('DSLSH_EDIT: negative position')
+    bytes = dereference content
+    amount = <blen>(bytes)
+    if amount > _limit then return refuse('DSLSH_LIMIT: edit content')
+    positions = .dslshmodel..positions(reference bytes,_limit,_remaining)
+    if positions.status() <> 0 then return refuse(positions.error())
+    if charge(amount) = 0 then return 0
+    text = bytes as .string
+    /* New logical lines use the explicit add/split operations. */
+    if kind = 'a' | kind = 'c' then do
+      do i = 0 to amount - 1
+        if <at..u8>(i) bytes = 10 then return refuse('DSLSH_EDIT: newline in line content')
+      end
+    end
+    if kind = 'a' then do
+      if line > _lines[0] then return refuse('DSLSH_EDIT: add line range')
+      if amount + 1 > _limit - _bytes then return refuse('DSLSH_LIMIT: document growth')
+      if charge(_bytes) = 0 then return 0
+      call arrayinsert _lines,line + 1,1,text
+      _bytes = _bytes + amount + 1
+      return 1
+    end
+    if line >= _lines[0] then return refuse('DSLSH_EDIT: line range')
+    entry = line + 1; original = _lines[entry]
+    original_bytes = original as .binary; size = <blen>(original_bytes)
+    extent = length(original)
+    if kind = 'b' then do
+      if charge(_bytes) = 0 then return 0
+      call arraydelete _lines,entry,1
+      _bytes = _bytes - size - 1
+      return 1
+    end
+    if column > extent then return refuse('DSLSH_EDIT: column range')
+    if kind = 'c' then do
+      if amount > _limit - _bytes then return refuse('DSLSH_LIMIT: document growth')
+      if charge(size * 2 + amount) = 0 then return 0
+      _lines[entry] = substr(original,1,column) || text || substr(original,column + 1)
+      _bytes = _bytes + amount
+      return 1
+    end
+    if kind = 'd' then do
+      if count > extent - column then return refuse('DSLSH_EDIT: deletion range')
+      if charge(size * 2) = 0 then return 0
+      replacement = substr(original,1,column) || substr(original,column + count + 1)
+      replacement_bytes = replacement as .binary
+      _lines[entry] = replacement; _bytes = _bytes - size + <blen>(replacement_bytes)
+      return 1
+    end
+    if kind = 'e' then do
+      if entry >= _lines[0] then return refuse('DSLSH_EDIT: join range')
+      if charge(_bytes + size) = 0 then return 0
+      _lines[entry] = original || _lines[entry + 1]
+      call arraydelete _lines,entry + 1,1
+      _bytes = _bytes - 1
+      return 1
+    end
+    if kind = 'f' then do
+      if _bytes >= _limit then return refuse('DSLSH_LIMIT: document growth')
+      if charge(_bytes + size) = 0 then return 0
+      tail = substr(original,column + 1)
+      _lines[entry] = substr(original,1,column)
+      call arrayinsert _lines,entry + 1,1,tail
+      _bytes = _bytes + 1
+      return 1
+    end
+    return refuse('DSLSH_EDIT: unknown operation')
+  source: method = .binary
+    out = .binary
+    if _error <> '' then return out
+    if charge(_bytes) = 0 then return out
+    call binresize out,_bytes
+    at = 0
+    do i = 1 to _lines[0]
+      bytes = _lines[i] as .binary; amount = <blen>(bytes)
+      call bincopy out,at,bytes,0,amount
+      at = at + amount; <at..u8>(at) out = 10; at = at + 1
+    end
+    return out
+
+/**
+ * One synchronous request at a time. Accepted bad SOURCE is ordinary committed
+ * text with an error-bearing result. Bad requests/callback results never commit.
+ */
+service: class
+  _provider = .dslshmodel..parser
+  _policy = .dslshmodel..limits
+  _ids = .string[]
+  _versions = .int[]
+  _sources = .binary[]
+  _count = .int
+  _total = .int
+  _status = .int
+  _error = .string
+  _terminal = .int
+  _publishing = .int
+  *: factory
+    arg provider = .dslshmodel..parser, policy = .dslshmodel..limits()
+    _provider = provider; _policy = policy
+    _count = 0; _total = 0; _status = 0; _error = ''; _terminal = 0; _publishing = 0
+    return
+  status: method = .int
+    return _status
+  error: method = .string
+    return _error
+  terminal: method = .int
+    return _terminal
+  documents: method = .int
+    if _terminal then return 0
+    return _count
+  lookup: method = .int
+    arg document = .string
+    if _terminal then return 0
+    do i = 1 to _count
+      if _ids[i] == document then return i
+    end
+    return 0
+  version: method = .int
+    arg document = .string
+    slot = lookup(document)
+    if slot = 0 then return -1
+    return _versions[slot]
+  source: method = .binary
+    arg document = .string
+    slot = lookup(document); empty = .binary
+    if slot = 0 then return empty
+    return _sources[slot]
+  refuse: method = .binary
+    arg message = .string
+    _status = 1; _error = message
+    return '0' as .binary
+  handle: method = .binary
+    arg payload = reference .binary
+    if _terminal then return refuse('DSLSH_TERMINAL: publication failed; service cannot continue')
+    _status = 0; _error = ''
+    do
+      if initialized(_provider) = 0 then return refuse('DSLSH_PROVIDER: uninitialized parser')
+      if _policy.frame() < 1 | _policy.source() < 0 | _policy.source() > _policy.frame() | _policy.documents() < 1 | _policy.total() < _policy.source() | _policy.transactions() < 0 | _policy.tokens() < 3 | _policy.messages() < 0 | _policy.work() < 1 then return refuse('DSLSH_LIMIT: invalid policy')
+      wire = .dslshwire..reader(payload,_policy.frame())
+      field = .string
+      kind = wire.next()
+      if kind = 'C' then do
+        command = wire.next()
+        if command <> 'EP' & command <> '' then return refuse('DSLSH_WIRE: unknown config request')
+        if wire.complete() = 0 then return refuse(wire.error())
+        return 'C|' as .binary
+      end
+      if kind <> 'I' & kind <> 'D' & kind <> 'H' then return refuse('DSLSH_WIRE: unknown request')
+      document_id = .string; base = .int; version = .int; overlay = .string
+      slot = .int; candidate = .document; source = .binary; index = .dslshmodel..positions
+      old_bytes = 0; is_hypothesis = kind = 'H'
+      if kind = 'I' then do
+        field = wire.next(); version = wire.integer(field)
+        field = wire.next(); line_count = wire.integer(field,_policy.source())
+        field = wire.next(); document_id = wire.text(field)
+        if document_id = '' then document_id = 'unknown'
+        field = wire.next(); source = wire.unhex(field,_policy.source())
+        if wire.complete() = 0 | wire.status() <> 0 then return refuse(wire.error())
+        slot = lookup(document_id)
+        if slot = 0 & _count >= _policy.documents() then return refuse('DSLSH_LIMIT: document count')
+        if slot > 0 then old_bytes = <blen>(_sources[slot])
+        index = .dslshmodel..positions(reference source,_policy.source(),_policy.work())
+        if index.status() <> 0 then return refuse(index.error())
+        candidate = .document(reference source,_policy.source(),_policy.work())
+        if candidate.error() <> '' then return refuse(candidate.error())
+        if candidate.count() <> line_count then return refuse('DSLSH_WIRE: initial line count')
+        base = version; overlay = ''
+      end
+      else do
+        if wire.next() <> '2' then return refuse('DSLSH_WIRE: version-2 delta required')
+        field = wire.next(); document_id = wire.text(field)
+        field = wire.next(); base = wire.integer(field)
+        field = wire.next(); version = wire.integer(field)
+        field = wire.next(); overlay = wire.text(field)
+        field = wire.next(); transactions = wire.integer(field,_policy.transactions())
+        if wire.status() <> 0 then return refuse(wire.error())
+        slot = lookup(document_id)
+        if slot = 0 then return refuse('DSLSH_REVISION: unknown document')
+        if base <> _versions[slot] | base = 2147483647 | version <> base + 1 then return refuse('DSLSH_REVISION: stale/nonconsecutive delta')
+        source = _sources[slot]; old_bytes = <blen>(source)
+        candidate = .document(reference source,_policy.source(),_policy.work())
+        if candidate.error() <> '' then return refuse(candidate.error())
+        do i = 1 to transactions
+          operation = wire.next()
+          field = wire.next(); line = wire.integer(field,_policy.source())
+          field = wire.next(); column = wire.integer(field,_policy.source())
+          field = wire.next(); count = wire.integer(field,_policy.source())
+          field = wire.next(); content = wire.unhex(field,_policy.source())
+          if wire.status() <> 0 then return refuse(wire.error())
+          if candidate.edit(operation,line,column,count,reference content) = 0 then return refuse(candidate.error())
+        end
+        if wire.complete() = 0 then return refuse(wire.error())
+      end
+      prepared = candidate.source()
+      if candidate.error() <> '' then return refuse(candidate.error())
+      if <blen>(prepared) > _policy.total() - (_total - old_bytes) then return refuse('DSLSH_LIMIT: aggregate document bytes')
+      /* Initial input may lack the logical final newline; index exact output. */
+      if kind <> 'I' then index = .dslshmodel..positions(reference prepared,_policy.source(),candidate.remaining())
+      else if <blen>(prepared) <> <blen>(source) then index = .dslshmodel..positions(reference prepared,_policy.source(),candidate.remaining())
+      if index.status() <> 0 then return refuse(index.error())
+      context = .dslshmodel..request(document_id,base,version,overlay,is_hypothesis,reference index)
+      parsed = _provider.parse(reference prepared,reference context)
+      if initialized(parsed) = 0 then return refuse('DSLSH_PROVIDER: absent result')
+      if parsed.status() <> 0 then return refuse(parsed.error())
+      if parsed.count() > _policy.tokens() | parsed.messagebytes() > _policy.messages() then return refuse('DSLSH_LIMIT: callback result')
+      if parsed.finish(index.count()) = 0 then return refuse('DSLSH_RESULT: source extent mismatch')
+      response = dslshwire..resulttext(reference parsed,_policy.frame())
+      if <blen>(response) = 1 then return refuse('DSLSH_LIMIT: serialized result')
+      if is_hypothesis = 0 then do
+        _publishing = 1
+        if slot = 0 then do
+          slot = _count + 1; _ids[slot] = document_id
+        end
+        _sources[slot] = prepared
+        _total = _total - old_bytes + <blen>(prepared)
+        _versions[slot] = version
+        if slot > _count then _count = slot
+        _publishing = 0
+      end
+      return response
+    on signal as problem
+      if _publishing then _terminal = 1
+      return refuse('DSLSH_FAILURE: ' || problem.message())
+    end
+    return refuse('DSLSH_FAILURE: request interrupted')

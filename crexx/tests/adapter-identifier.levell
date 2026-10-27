@@ -1,0 +1,14 @@
+options levell
+namespace dslsh_fixture
+identifier: token
+string: token
+notes: comments nested '/*' '*/'
+scan: lexer
+  letter: charset = 'a' to 'z' | U+03BB
+  blank: charset = ' ' | U+0009 | U+000A | U+000D
+  string.body: charset = U+0020 to U+0021 | U+0023 to U+007E
+  name.lex: rule = letter+ then emit identifier
+  quoted.lex: rule = '"' string.body* '"' then emit string
+  spaces: rule = blank+ then skip
+parse: parser start document backend lr1
+document: rule = identifier | string

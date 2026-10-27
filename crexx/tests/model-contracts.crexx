@@ -1,0 +1,63 @@
+/* MIT licence. Independent DSLSH model and position contracts. */
+options levelb
+import rxfnsb
+import dslshmodel
+
+main: procedure = .int expose checks failures
+  checks = 0; failures = 0
+
+  plain = 'abc' as .binary
+  ascii = .dslshmodel..positions(reference plain)
+  call check(ascii.status() = 0 & ascii.bytes() = 3 & ascii.count() = 3, 'ASCII extent')
+  call check(ascii.byte(0) = 0 & ascii.byte(1) = 1 & ascii.byte(3) = 3 & ascii.point(2) = 2, 'ASCII boundaries')
+
+  mixed = '61CEBBF09F988062'x as .binary
+  unicode = .dslshmodel..positions(reference mixed)
+  call check(unicode.status() = 0 & unicode.bytes() = 8 & unicode.count() = 4, 'Unicode extent')
+  call check(unicode.byte(0) = 0 & unicode.byte(1) = 1 & unicode.byte(2) = 3 & unicode.byte(3) = 7 & unicode.byte(4) = 8, 'Unicode forward map')
+  call check(unicode.point(0) = 0 & unicode.point(1) = 1 & unicode.point(3) = 2 & unicode.point(7) = 3 & unicode.point(8) = 4, 'Unicode inverse map beyond first two points')
+  call check(unicode.point(2) = -1 & unicode.point(4) = -1 & unicode.byte(5) = -1, 'interior byte and out-of-range points refused')
+
+  bad_utf8 = '80'x as .binary
+  malformed = .dslshmodel..positions(reference bad_utf8)
+  call check(malformed.status() <> 0 & pos('UTF8',malformed.error()) > 0, 'invalid UTF-8 refused')
+  nul_source = '610062'x as .binary
+  nul = .dslshmodel..positions(reference nul_source)
+  call check(nul.status() <> 0 & pos('NUL',nul.error()) > 0, 'embedded NUL refused')
+  limited = .dslshmodel..positions(reference mixed,7)
+  call check(limited.status() <> 0 & pos('LIMIT',limited.error()) > 0, 'source budget refused')
+
+  identity = .dslshmodel..request('one.rexx',2,3,'preview',1)
+  call check(identity.docid() == 'one.rexx' & identity.base() = 2 & identity.version() = 3 & identity.overlay() == 'preview' & identity.hypothesis() = 1 & identity.haspositions() = 0, 'request identity and optional index')
+  indexed = .dslshmodel..request('indexed.rexx',0,1,'',0,reference unicode)
+  index = dereference indexed.positions()
+  call check(indexed.haspositions() = 1 & index.point(7) = 3 & index.byte(4) = 8, 'borrowed position index shares exact source boundaries')
+
+  tree = .dslshmodel..result()
+  call check(tree.begin(71,0,4) = 1 & tree.leaf(41,0,1) = 1 & tree.leaf(54,1,3) = 1 & tree.leaf(34,4,0) = 1 & tree.close() = 1, 'tree construction')
+  call check(tree.finish(4) = 1 & tree.status() = 0 & tree.count() = 6, 'one covered file tree')
+  call check(tree.finish(3) = 0 & tree.status() = 0 & tree.finish(4) = 1, 'sealed tree refuses a different source extent')
+  call check(tree.type(1) = 100 & tree.pos(1) = 0 & tree.length(1) = 4 & tree.type(2) = 71 & tree.type(6) = 101, 'wire root structural markers')
+
+  empty = .dslshmodel..result()
+  call check(empty.begin(71,0,0,0,2,'ERR','empty source') = 1 & empty.close() = 1 & empty.finish(0) = 1, 'empty file with root diagnostic')
+  call check(empty.type(1) = 100 & empty.length(1) = 0 & empty.severity(1) = 2 & empty.code(1) == 'ERR' & empty.message(1) == 'empty source', 'C reconstructs diagnostic from TREE_DOWN')
+
+  gap = .dslshmodel..result()
+  call gap.begin(71,0,2)
+  call gap.leaf(54,1,1)
+  call gap.close()
+  call check(gap.finish(2) = 0 & pos('gap',gap.error()) > 0, 'uncovered source refused')
+  tiny = .dslshmodel..result(2)
+  call check(tiny.begin(71,0,1) = 1 & tiny.leaf(54,0,1) = 0 & pos('LIMIT',tiny.error()) > 0, 'record budget refused')
+
+  say 'DSLSH_MODEL|checks=' || checks || '|failures=' || failures
+  return failures
+
+check: procedure = .void expose checks failures
+  arg condition = .int, label = .string
+  checks = checks + 1
+  if condition then return
+  failures = failures + 1
+  say 'FAIL|' || label
+  return

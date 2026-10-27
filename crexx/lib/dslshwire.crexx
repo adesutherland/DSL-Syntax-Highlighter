@@ -1,0 +1,156 @@
+/* MIT licence. Bounded existing DSLSH wire fields; no transport or sessions. */
+options levelb
+namespace dslshwire expose reader hexadecimal resulttext
+import rxfnsb
+import dslshmodel
+
+/** Empty fields are significant. Never use a word/token splitter here. */
+reader: class
+  _bytes = .binary
+  _at = .int
+  _length = .int
+  _status = .int
+  _error = .string
+  *: factory
+    arg payload = reference .binary, limit = 8388608
+    _at = 0; _status = 0; _error = ''
+    do
+      source = dereference payload
+      _length = <blen>(source)
+      if limit < 0 | _length > limit then do
+        _status = 1; _error = 'DSLSH_LIMIT: request frame'; return
+      end
+      do i = 0 to _length - 1
+        byte = <at..u8>(i) source
+        if byte < 32 | byte > 126 then do
+          _status = 1; _error = 'DSLSH_WIRE: non-ASCII request'; return
+        end
+      end
+      _bytes = source
+    end
+    return
+  fail: method = .void
+    arg message = .string
+    _status = 1
+    if _error = '' then _error = message
+    return
+  status: method = .int
+    return _status
+  error: method = .string
+    return _error
+  next: method = .string
+    if _status <> 0 then return ''
+    if _at > _length then do
+      call fail('DSLSH_WIRE: missing field'); return ''
+    end
+    start = _at
+    do while _at < _length
+      if <at..u8>(_at) _bytes = 124 then leave
+      _at = _at + 1
+    end
+    amount = _at - start; _at = _at + 1
+    return (<at..binary>(start,amount) _bytes) as .string
+  complete: method = .int
+    /* Accept the optional final delimiter documented by older endpoints. */
+    if _status <> 0 then return 0
+    if _at < _length then do
+      call fail('DSLSH_WIRE: extra fields'); return 0
+    end
+    return 1
+  integer: method = .int
+    arg text = .string, maximum = 2147483647
+    if _status <> 0 then return -1
+    if length(text) = 0 | length(text) > 20 | maximum < 0 then do
+      call fail('DSLSH_WIRE: integer field'); return -1
+    end
+    value = 0
+    do i = 1 to length(text)
+      character = substr(text,i,1); digit = rxfnsb..pos(character,'0123456789') - 1
+      if digit < 0 then do
+        call fail('DSLSH_WIRE: integer digit'); return -1
+      end
+      if digit > maximum | value > (maximum - digit) <idiv> 10 then do
+        call fail('DSLSH_LIMIT: integer field'); return -1
+      end
+      value = value * 10 + digit
+    end
+    return value
+  unhex: method = .binary
+    arg text = .string, maximum = 2097152
+    empty = .binary
+    if _status <> 0 then return empty
+    encoded = text as .binary; amount = <blen>(encoded)
+    if maximum < 0 | amount <idiv> 2 > maximum | amount <mod> 2 <> 0 then do
+      call fail('DSLSH_WIRE: hex field extent'); return empty
+    end
+    decoded = .binary; call binresize decoded, amount <idiv> 2
+    at = 0
+    do i = 0 to amount - 1 by 2
+      high = nibble(<at..u8>(i) encoded); low = nibble(<at..u8>(i + 1) encoded)
+      if high < 0 | low < 0 then do
+        call fail('DSLSH_WIRE: invalid hex digit'); return empty
+      end
+      <at..u8>(at) decoded = high * 16 + low; at = at + 1
+    end
+    return decoded
+  nibble: method = .int
+    arg byte = .int
+    if byte >= 48 & byte <= 57 then return byte - 48
+    if byte >= 65 & byte <= 70 then return byte - 55
+    if byte >= 97 & byte <= 102 then return byte - 87
+    return -1
+  text: method = .string
+    arg encoded = .string, maximum = 4096
+    bytes = unhex(encoded,maximum)
+    if _status <> 0 then return ''
+    index = .dslshmodel..positions(reference bytes,maximum,maximum)
+    if index.status() <> 0 then do
+      call fail(index.error()); return ''
+    end
+    return bytes as .string
+
+/** Exact hex over bytes. The destination is allocated once. */
+hexadecimal: procedure = .binary
+  arg source = reference .binary
+  data = dereference source
+  amount = <blen>(data); out = .binary
+  call binresize out, amount * 2
+  table = '0123456789abcdef' as .binary
+  do i = 0 to amount - 1
+    byte = <at..u8>(i) data
+    <at..u8>(i * 2) out = <at..u8>(byte <idiv> 16) table
+    <at..u8>(i * 2 + 1) out = <at..u8>(byte <mod> 16) table
+  end
+  return out
+
+append: procedure = .int
+  arg expose target = .binary, text = .string, maximum = .int
+  bytes = text as .binary
+  if <blen>(bytes) > maximum - <blen>(target) then return 0
+  call binappend target,bytes
+  return 1
+
+appendhex: procedure = .int
+  arg expose target = .binary, text = .string, maximum = .int
+  bytes = text as .binary
+  if <blen>(bytes) > (maximum - <blen>(target)) <idiv> 2 then return 0
+  encoded = hexadecimal(reference bytes)
+  call binappend target,encoded
+  return 1
+
+/** No reply identity envelope is added: this interoperates with the C codec. */
+resulttext: procedure = .binary
+  arg value = reference .dslshmodel..result, maximum = 8388608
+  rejected = '0' as .binary
+  result = dereference value
+  if result.status() <> 0 | maximum < 1 then return rejected
+  out = .binary
+  if append(out,result.count() as .string,maximum) = 0 then return rejected
+  do i = 1 to result.count()
+    header = '|' || result.type(i) || '|' || result.pos(i) || '|' || result.length(i) || '|' || result.identifier(i) || '|' || result.severity(i) || '|'
+    if append(out,header,maximum) = 0 then return rejected
+    if appendhex(out,result.code(i),maximum) = 0 then return rejected
+    if append(out,'|',maximum) = 0 then return rejected
+    if appendhex(out,result.message(i),maximum) = 0 then return rejected
+  end
+  return out

@@ -1,0 +1,63 @@
+/* MIT licence. Independent DSLSH field and reply serialization contracts. */
+options levelb
+import dslshmodel
+import dslshwire
+
+main: procedure = .int expose checks failures
+  checks = 0; failures = 0
+
+  fields = 'a||b' as .binary
+  input = .dslshwire..reader(reference fields)
+  call check(input.status() = 0 & input.next() == 'a' & input.next() == '' & input.next() == 'b' & input.complete() = 1, 'empty fields')
+  call check(input.next() == '' & input.status() <> 0, 'missing field fails closed')
+  final_separator = 'a|' as .binary
+  terminated = .dslshwire..reader(reference final_separator)
+  call check(terminated.next() == 'a' & terminated.complete() = 1, 'optional final delimiter')
+
+  digits = '0' as .binary
+  numbers = .dslshwire..reader(reference digits)
+  call check(numbers.integer('0') = 0 & numbers.integer('2147483647') = 2147483647, 'bounded decimal values')
+  call check(numbers.integer('2147483648') = -1 & numbers.status() <> 0, 'decimal overflow refused')
+  negative = .dslshwire..reader(reference digits)
+  call check(negative.integer('-1') = -1 & negative.status() <> 0, 'signed decimal refused')
+
+  encoded = 'CEBB00ff' as .binary
+  hex = .dslshwire..reader(reference encoded)
+  decoded = hex.unhex('CEBB00ff')
+  call check(hex.status() = 0 & <blen>(decoded) = 4 & <at..u8>(0) decoded = 206 & <at..u8>(1) decoded = 187 & <at..u8>(2) decoded = 0 & <at..u8>(3) decoded = 255, 'mixed-case hex and NUL bytes')
+  reencoded = dslshwire..hexadecimal(reference decoded)
+  call check(reencoded as .string == 'cebb00ff', 'hex response uses lowercase')
+  odd = .dslshwire..reader(reference encoded)
+  ignored = odd.unhex('abc')
+  call check(odd.status() <> 0 & <blen>(ignored) = 0, 'odd-length hex refused')
+  bad_hex = .dslshwire..reader(reference encoded)
+  ignored = bad_hex.unhex('gg')
+  call check(bad_hex.status() <> 0 & <blen>(ignored) = 0, 'invalid hex digit refused')
+
+  text = .dslshwire..reader(reference encoded)
+  decoded_text = text.text('C3A9')
+  text_bytes = decoded_text as .binary
+  call check(text.status() = 0 & <blen>(text_bytes) = 2 & <at..u8>(0) text_bytes = 195 & <at..u8>(1) text_bytes = 169, 'UTF-8 text field')
+  call check(text.text('610062') == '' & text.status() <> 0, 'NUL text field refused')
+
+  tree = .dslshmodel..result()
+  call tree.begin(71,0,1,0,2,'E','msg')
+  call tree.leaf(41,0,1)
+  call tree.close()
+  call check(tree.finish(1) = 1, 'reply tree admitted')
+  reply = dslshwire..resulttext(reference tree)
+  expected = '4|100|0|1|0|2|45|6d7367|71|0|1|0|2|||41|0|1|0|0|||101|1|0|0|0||'
+  call check(reply as .string == expected, 'exact C token-stream text, root diagnostic and close endpoint')
+  short = dslshwire..resulttext(reference tree,2)
+  call check(short as .string == '0', 'output byte budget cannot publish partial reply')
+
+  say 'DSLSH_WIRE|checks=' || checks || '|failures=' || failures
+  return failures
+
+check: procedure = .void expose checks failures
+  arg condition = .int, label = .string
+  checks = checks + 1
+  if condition then return
+  failures = failures + 1
+  say 'FAIL|' || label
+  return

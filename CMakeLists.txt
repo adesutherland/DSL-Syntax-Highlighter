@@ -29,12 +29,14 @@ option(DSLSH_BUILD_C "Build the bundled C parser adapter" ${DSLSH_BUILD_PARSERS}
 option(DSLSH_BUILD_PYTHON "Build the bundled Python parser adapter" ${DSLSH_BUILD_PARSERS})
 option(DSLSH_BUILD_JAVASCRIPT "Build the bundled JavaScript parser adapter" ${DSLSH_BUILD_PARSERS})
 option(DSLSH_INSTALL "Install DSLSH build products" ${DSLSH_DEFAULT_FULL_BUILD})
+option(DSLSH_BUILD_CREXX "Build the optional cREXX B/L parser library" OFF)
 
 include(cmake/DslshRpath.cmake)
 
-if((DSLSH_BUILD_TOOLS OR DSLSH_BUILD_EXAMPLES OR DSLSH_BUILD_PARSERS OR DSLSH_BUILD_TESTS)
+if((DSLSH_BUILD_TOOLS OR DSLSH_BUILD_EXAMPLES OR DSLSH_BUILD_PARSERS OR
+    (DSLSH_BUILD_TESTS AND NOT DSLSH_BUILD_CREXX))
     AND NOT DSLSH_BUILD_CORE)
-  message(FATAL_ERROR "DSLSH tools, examples, parsers, and tests require DSLSH_BUILD_CORE=ON")
+  message(FATAL_ERROR "DSLSH C tools, examples, parsers, and C-only tests require DSLSH_BUILD_CORE=ON")
 endif()
 
 if(DSLSH_BUILD_CORE)
@@ -79,6 +81,10 @@ endif()
 
 if(DSLSH_BUILD_TOOLS)
   add_subdirectory(tools)
+endif()
+
+if(DSLSH_BUILD_CREXX)
+  add_subdirectory(crexx)
 endif()
 
 if(DSLSH_INSTALL)

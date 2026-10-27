@@ -1,0 +1,137 @@
+/* MIT licence. Independent Level L projection, identity and damage controls. */
+options levelb
+import rxfnsb
+import dslsh_fixture
+import dslshmodel
+import dslshlevel
+
+notice: class implements .dslshlevel..validator
+  *: factory
+    return
+  check: method = .void
+    arg source = reference .binary, tokens = reference .llcore..stream, tree = reference .llcore..tree, root = .int, output = reference .dslshlevel..validation
+    bytes = dereference source
+    collector = dereference output
+    accepted = .int
+    if bytes as .string == 'abcdefgh' then do
+      accepted = collector.refine(0,8,35,77)
+      accepted = collector.diagnostic(6,7,2,'INTERIOR','one-codepoint warning')
+    end
+    else if bytes as .string <> 'λ' then accepted = collector.diagnostic(0,min(1,<blen>(bytes)),1,'VALIDATED','clean source')
+    return
+main: procedure = .int expose checks failures
+  checks = 0; failures = 0
+  i = .int
+  definition = dslsh_fixture..language()
+  mapping = .dslshlevel..profile()
+  call check(mapping.token('identifier',35) = 1 & mapping.rule('document',72) = 1 & mapping.finish(reference definition) = 1, 'sealed token and named-rule profile')
+  call check(mapping.belongs(reference definition) = 1 & mapping.token('identifier',35) = 0, 'profile owner and post-seal mutation refusal')
+  other = dslsh_fixture..language()
+  call check(mapping.belongs(reference other) = 0, 'foreign definition is not this profile owner')
+  absent = .dslshlevel..profile()
+  accepted = absent.token('not_declared',35)
+  call check(accepted = 1 & absent.finish(reference definition) = 0 & pos('unknown token',absent.error()) > 0, 'unknown token refuses profile')
+  duplicate = .dslshlevel..profile()
+  accepted = duplicate.token('identifier',35)
+  call check(accepted = 1 & duplicate.token('identifier',35) = 0 & pos('duplicate token',duplicate.error()) > 0, 'duplicate mapping refuses profile')
+
+  callback = .notice()
+  parser = .dslshlevel..adapter(reference definition,mapping,callback)
+  source = 'abcdefgh' as .binary
+  context = .dslshmodel..request('identifier.test',0,1,'',0)
+  result = parser.parse(reference source,reference context)
+  call check(result.status() = 0, 'clean LR1 callback admitted')
+  interior = 0; root = 0; refined = 0
+  do i = 1 to result.count()
+    if result.type(i) = 71 & result.pos(i) = 0 & result.length(i) = 8 then root = root + 1
+    if result.type(i) = 35 & result.identifier(i) = 77 then refined = refined + result.length(i)
+    if result.type(i) = 35 & result.pos(i) = 6 & result.length(i) = 1 & result.identifier(i) = 77 & result.severity(i) = 2 & result.code(i) == 'INTERIOR' then interior = interior + 1
+  end
+  call check(root = 1 & refined = 8 & interior = 1, 'interior diagnostic [6,7) splits one [0,8) identified token without losing coverage')
+
+  unicode = 'λ' as .binary
+  context = .dslshmodel..request('unicode.test',0,1,'',0)
+  result = parser.parse(reference unicode,reference context)
+  leaf = 0
+  do i = 1 to result.count()
+    if result.type(i) = 35 & result.pos(i) = 0 & result.length(i) = 1 then leaf = leaf + 1
+  end
+  call check(result.status() = 0 & leaf = 1, 'two-byte UTF-8 maps to one codepoint')
+
+  line = ('abcdefgh' || '0d0a'x) as .binary
+  context = .dslshmodel..request('line.test',0,1,'',0)
+  result = parser.parse(reference line,reference context)
+  root = 0
+  do i = 1 to result.count()
+    if result.type(i) = 71 & result.length(i) = 10 then root = root + 1
+  end
+  call check(result.status() = 0 & root = 1, 'CRLF retains two codepoint positions')
+
+  commented = '/* hi */abcdefgh' as .binary
+  context = .dslshmodel..request('comment.test',0,1,'',0)
+  result = parser.parse(reference commented,reference context)
+  comment = 0; first_comment = 0; rest_comment = 0
+  do i = 1 to result.count()
+    if result.type(i) = 38 then do
+      comment = comment + result.length(i)
+      if result.pos(i) = 0 & result.length(i) = 1 & result.code(i) == 'VALIDATED' then first_comment = first_comment + 1
+      if result.pos(i) = 1 & result.length(i) = 7 then rest_comment = rest_comment + 1
+    end
+  end
+  call check(result.status() = 0 & comment = 8 & first_comment = 1 & rest_comment = 1, 'observed outer comment covers exact bytes across diagnostic split')
+
+  damaged = 'abcdefgh?' as .binary
+  context = .dslshmodel..request('damaged.test',0,1,'',0)
+  result = parser.parse(reference damaged,reference context)
+  validated = 0
+  do i = 1 to result.count()
+    if result.code(i) == 'VALIDATED' | result.code(i) == 'INTERIOR' then validated = validated + 1
+  end
+  call check(result.status() = 0 & validated = 0, 'syntax damage projects source without invoking clean-only validator')
+
+  unfinished_quote = '"abc' as .binary
+  context = .dslshmodel..request('quote.test',0,1,'',0)
+  result = parser.parse(reference unfinished_quote,reference context)
+  root = 0; input_error = 0; validated = 0
+  do i = 1 to result.count()
+    if result.type(i) = 71 & result.pos(i) = 0 & result.length(i) = 4 then root = root + 1
+    if result.code(i) == 'L_INPUT' then input_error = input_error + 1
+    if result.code(i) == 'VALIDATED' | result.code(i) == 'INTERIOR' then validated = validated + 1
+  end
+  call check(result.status() = 0 & root = 1 & input_error > 0 & validated = 0, 'unfinished quote has covered error tree and no validator')
+
+  unfinished_comment = '/* abc' as .binary
+  context = .dslshmodel..request('comment-error.test',0,1,'',0)
+  result = parser.parse(reference unfinished_comment,reference context)
+  root = 0; input_error = 0; validated = 0
+  do i = 1 to result.count()
+    if result.type(i) = 71 & result.pos(i) = 0 & result.length(i) = 6 then root = root + 1
+    if result.code(i) == 'L_INPUT' then input_error = input_error + 1
+    if result.code(i) == 'VALIDATED' | result.code(i) == 'INTERIOR' then validated = validated + 1
+  end
+  call check(result.status() = 0 & root = 1 & input_error > 0 & validated = 0, 'unfinished comment has covered error tree and no validator')
+
+  invalid = '61ff'x as .binary
+  context = .dslshmodel..request('invalid.test',0,1,'',0)
+  result = parser.parse(reference invalid,reference context)
+  call check(result.status() <> 0, 'invalid UTF-8 refuses before trusted validation')
+
+  tiny = .dslshlevel..adapter(reference definition,mapping,callback,20000000,2)
+  context = .dslshmodel..request('small.test',0,1,'',0)
+  result = tiny.parse(reference source,reference context)
+  call check(result.status() <> 0 & pos('LIMIT',result.error()) > 0, 'small result budget refuses without partial success')
+
+  starved = .dslshlevel..adapter(reference definition,mapping,callback,1,200000)
+  result = starved.parse(reference source,reference context)
+  call check(result.status() <> 0 & pos('LIMIT',result.error()) > 0, 'recognition work exhaustion is a resource refusal')
+
+  say 'DSLSH_ADAPTER|checks=' || checks || '|failures=' || failures
+  return failures
+
+check: procedure = .void expose checks failures
+  arg condition = .int, label = .string
+  checks = checks + 1
+  if condition then return
+  failures = failures + 1
+  say 'FAIL|' || label
+  return

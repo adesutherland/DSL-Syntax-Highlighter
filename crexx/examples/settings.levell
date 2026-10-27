@@ -1,0 +1,30 @@
+/* A small independent language; validation policy stays in its B reader. */
+options levell
+namespace dslsh_settings
+
+identifier: token
+number: token
+string: token
+equals: token
+separator: token
+
+blocks: comments nested "/*" "*/"
+lines: comments line "#"
+scan: lexer input utf8
+  letter: charset = 'a' to 'z' | 'A' to 'Z' | '_' | U+00E9 | U+0394 | U+6E29
+  digit: charset = '0' to '9'
+  space: charset = ' ' | U+0009
+  string.body: charset = scalar except '"' | U+000A | U+000D
+  name.lex: rule = letter (letter | digit)* then emit identifier
+  number.lex: rule = digit+ then emit number
+  string.lex: rule = '"' (string.body | '""')* '"' then emit string
+  equals.lex: rule = '=' then emit equals
+  separator.lex: rule = U+000D U+000A | U+000D | U+000A | ';' then emit separator
+  whitespace: rule = space+ then skip
+
+parse: parser start settings backend lr1
+  settings: rule = separator* (assignment (separator assignment?)*)?
+  assignment: rule = identifier equals value
+  value: rule = number | string
+
+value.error: diagnostic rule value = 'Expected a number or quoted string; found {found}.'

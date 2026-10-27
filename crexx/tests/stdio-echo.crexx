@@ -1,0 +1,29 @@
+/* MIT licence. Tiny parser for independent framed STDIO and C-client checks. */
+options levelb
+import dslshmodel
+import dslshsession
+import dslshstdio
+
+echo: class implements .dslshmodel..parser
+  *: factory
+    return
+  parse: method = .dslshmodel..result
+    arg source = reference .binary, context = reference .dslshmodel..request
+    request = dereference context
+    index = dereference request.positions()
+    result = .dslshmodel..result()
+    if index.count() = 0 then do
+      call result.begin(71,0,0,0,3,'EMPTY','Empty source')
+    end
+    else do
+      call result.begin(71,0,index.count())
+      call result.leaf(35,0,index.count())
+    end
+    call result.close()
+    call result.finish(index.count())
+    return result
+
+main: procedure = .int
+  parser = .echo()
+  service = .dslshsession..service(parser)
+  return dslshstdio..run(reference service)

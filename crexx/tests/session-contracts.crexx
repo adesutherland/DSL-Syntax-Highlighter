@@ -1,0 +1,86 @@
+/* MIT licence. Independent six-operation DSLSH session and refusal checks. */
+options levelb
+import rxfnsb
+import dslshmodel
+import dslshsession
+
+/** Return one full-coverage token. The service, not this callback, owns revisions. */
+echo: class implements .dslshmodel..parser
+  *: factory
+    return
+  parse: method = .dslshmodel..result
+    arg source = reference .binary, context = reference .dslshmodel..request
+    data = dereference source
+    request = dereference context
+    index = dereference request.positions()
+    result = .dslshmodel..result()
+    if <blen>(data) > 0 then do
+      if <at..u8>(0) data = 63 then return result
+    end
+    call result.begin(71,0,index.count())
+    if index.count() > 0 then call result.leaf(35,0,index.count())
+    call result.close()
+    call result.finish(index.count())
+    return result
+
+main: procedure = .int expose checks failures
+  checks = 0; failures = 0
+  parser = .echo()
+  session = .dslshsession..service(parser)
+
+  config = 'C|EP' as .binary
+  answer = session.handle(reference config)
+  call check(answer as .string == 'C|' & session.status() = 0 & session.documents() = 0, 'EP capability reply has no source state')
+
+  first = 'I|1|1|41|61620a|' as .binary
+  answer = session.handle(reference first)
+  call check(session.status() = 0 & session.documents() = 1 & session.version('A') = 1 & bin2x(session.source('A')) == '61620A' & answer as .string <> '0', 'initial A and canonical final LF')
+  second = 'I|1|1|42|78790a|' as .binary
+  answer = session.handle(reference second)
+  call check(session.status() = 0 & session.documents() = 2 & session.version('B') = 1 & bin2x(session.source('B')) == '78790A', 'independent second document')
+
+  add_chars = 'D|2|41|1|2||1|c|0|1|0|5a' as .binary
+  answer = session.handle(reference add_chars)
+  call check(session.status() = 0 & session.version('A') = 2 & bin2x(session.source('A')) == '615A620A', 'c adds codepoints at column')
+  delete_chars = 'D|2|41|2|3||1|d|0|1|1|' as .binary
+  answer = session.handle(reference delete_chars)
+  call check(session.status() = 0 & session.version('A') = 3 & bin2x(session.source('A')) == '61620A', 'd deletes codepoints')
+  add_line = 'D|2|41|3|4||1|a|1|0|0|7172' as .binary
+  answer = session.handle(reference add_line)
+  call check(session.status() = 0 & session.version('A') = 4 & bin2x(session.source('A')) == '61620A71720A', 'a adds a complete line')
+  join_lines = 'D|2|41|4|5||1|e|0|0|0|' as .binary
+  answer = session.handle(reference join_lines)
+  call check(session.status() = 0 & session.version('A') = 5 & bin2x(session.source('A')) == '616271720A', 'e joins adjacent lines')
+  split_line = 'D|2|41|5|6||1|f|0|2|0|' as .binary
+  answer = session.handle(reference split_line)
+  call check(session.status() = 0 & session.version('A') = 6 & bin2x(session.source('A')) == '61620A71720A', 'f splits at codepoint column')
+  delete_line = 'D|2|41|6|7||1|b|1|0|0|' as .binary
+  answer = session.handle(reference delete_line)
+  call check(session.status() = 0 & session.version('A') = 7 & bin2x(session.source('A')) == '61620A', 'b deletes one line')
+
+  preview = 'H|2|41|7|8|70726576696577|1|c|0|2|0|21' as .binary
+  answer = session.handle(reference preview)
+  call check(session.status() = 0 & answer as .string <> '0' & session.version('A') = 7 & bin2x(session.source('A')) == '61620A', 'hypothesis returns tree without commit')
+  call check(session.version('B') = 1 & bin2x(session.source('B')) == '78790A', 'A edits and H leave B unchanged')
+
+  stale = 'D|2|41|6|8||1|c|0|2|0|21' as .binary
+  answer = session.handle(reference stale)
+  call check(session.status() <> 0 & answer as .string == '0' & session.version('A') = 7 & bin2x(session.source('A')) == '61620A', 'stale delta refuses without commit')
+  malformed = 'D|2|41|7|8||1|c|0|2|0|GG' as .binary
+  answer = session.handle(reference malformed)
+  call check(session.status() <> 0 & answer as .string == '0' & session.version('A') = 7, 'malformed hex refuses atomically')
+  invalid_callback = 'I|1|1|43|3f0a|' as .binary
+  answer = session.handle(reference invalid_callback)
+  call check(session.status() <> 0 & answer as .string == '0' & session.documents() = 2 & session.version('C') = -1, 'callback refusal does not publish C')
+  call check(session.terminal() = 0 & session.version('B') = 1, 'ordinary refusals keep server usable and B intact')
+
+  say 'DSLSH_SESSION|checks=' || checks || '|failures=' || failures
+  return failures
+
+check: procedure = .void expose checks failures
+  arg condition = .int, label = .string
+  checks = checks + 1
+  if condition then return
+  failures = failures + 1
+  say 'FAIL|' || label
+  return
