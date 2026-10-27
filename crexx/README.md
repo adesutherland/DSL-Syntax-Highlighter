@@ -133,4 +133,69 @@ under `share/dslsyntax/crexx`. The external CREXX VM and SDK remain separately
 supplied dependencies. Cross builds and browser/WASM deployment are not qualified
 by this native host-tools configuration.
 
-<!-- Level L adapter documentation follows; owned by the adapter worker. -->
+## Optional Classic Rexx example
+
+`dslshclassic.adapter` implements the same parser callback using CREXX's
+maintained `levelc.rxl` grammar and `llcparse.parsed` preparation. It asks for
+bounded `observedtokens()`/`observedtrivia()` values once per request, then
+uses `dslshlevel.project()` with root zero. The result contains a flat file
+root, lexical categories, observed comments, unknown coverage and original
+located parser diagnostics; it does not claim a recovered or semantic AST.
+No edited Rexx source is executed. Active `OPTIONS ... SRCMAP` is refused
+because these editor spans require exact original bytes.
+
+This example requires a prepared CREXX research build with the default-off
+Classic observation API (`parsed(..., observations)`, `observedtokens()`,
+`observedtrivia()` and `mapped()`). Add the build root explicitly:
+
+```sh
+cmake -S . -B build-crexx -DDSLSH_BUILD_CREXX=ON \
+  -DCREXX_BIN_DIR=/absolute/path/to/CREXX/build/bin \
+  -DCREXX_CLASSIC_BUILD_DIR=/absolute/path/to/CREXX/build \
+  -DDSLSH_BUILD_CORE=OFF -DDSLSH_BUILD_TOOLS=OFF \
+  -DDSLSH_BUILD_EXAMPLES=OFF -DDSLSH_BUILD_PARSERS=OFF \
+  -DDSLSH_BUILD_TESTS=ON -DBUILD_TESTING=ON
+cmake --build build-crexx --target dslsh_crexx_examples dslsh_crexx_contracts --parallel 4
+ctest --test-dir build-crexx -L classic --output-on-failure
+```
+
+Configuration checks five existing artifacts under that build root:
+
+- `research/level-l/compilers/frontends/llcgrammar.rxbin`
+- `research/level-l/compilers/levelc/opt/llclanguage.rxbin`
+- `research/level-l/compilers/levelc/opt/llcsrcmap.rxbin`
+- `research/level-l/compilers/levelc/opt/llcparse.rxbin`
+- `lib/rxfnsc/members/RexxClassicUnicodeProperties/RexxClassicUnicodeProperties.rxbin`
+
+They are copied into private imports without rebuilding CREXX or regenerating
+the grammar. The selected `library.rxbin` and `rxfnsl.rxbin` must match that
+build's SDK byte for byte. An empty `CREXX_CLASSIC_BUILD_DIR` adds no Classic
+build dependency. The default C-only configuration remains independent.
+
+The standalone `programs/dslsh-classic.rxbin` links those five parser modules,
+`library`, `rxfnsl`, the four DSLSH core modules, `dslshlevel` and `dslshclassic`.
+The selected closure also includes generic Level L SDK transitive modules,
+including `llir` and `llirservices`. It excludes the Classic C frontend,
+`llcir`, `llcdynamic`, Classic executor and RXAS selector modules. Inspect
+`rxlink -p` for each build to audit the actual selected modules and external
+RXPA provider requirements. The installed endpoint contains its bytecode closure
+and requires the external matching VM/native runtime. The separately installed
+`dslshclassic` module and five parser modules support relinking; consumers must
+additionally supply the matching SDK and DSLSH model/projection modules.
+
+Launch the endpoint with:
+
+```sh
+/absolute/path/to/CREXX/build/bin/rxbvm --no-autoload \
+  /absolute/path/to/build-crexx/crexx/programs/dslsh-classic.rxbin -a --stdio
+```
+
+`examples/classic.rexx` is representative edited text, including Unicode,
+control flow, a call/label routine, nested comments and continuation punctuation.
+Send its contents through framed initial-load traffic; it is not an endpoint
+command-line argument. Classic syntax admission and its original diagnostics
+come from the maintained parser, with lexical fallback for invalid source.
+The source-byte and observation limits bound recognition through that parser;
+the adapter's `work` argument bounds indexing/projection, not an aggregate
+whole-process fuel counter. Browser/WASM, platform qualification and full Classic
+semantic analysis remain outside this example.

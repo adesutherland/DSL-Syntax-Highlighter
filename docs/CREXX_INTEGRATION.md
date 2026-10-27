@@ -46,6 +46,14 @@ requests, not a source filename or unframed text on stdin. The bytecode still
 requires RXVM. The external VM/toolchain installation, native platforms and
 browser transport are separate from this component's local qualification.
 
+For the optional Classic Rexx example, also set `CREXX_CLASSIC_BUILD_DIR` to an
+existing CREXX research build containing the maintained Classic grammar/parser
+artifacts and the observation API. DSLSH stages their existing bytecode and
+checks that its selected SDK matches; it never recursively builds CREXX.
+The [component README](../crexx/README.md#optional-classic-rexx-example)
+lists the exact parser-only closure and build commands. Launch
+`dslsh-classic.rxbin` with the same `--no-autoload ... -a --stdio` form.
+
 ## Ownership and data flow
 
 `dslshmodel`, `dslshwire`, `dslshsession` and `dslshstdio` own the shared values,
@@ -159,6 +167,18 @@ snapshot. Resource exhaustion (2) and invalid contract/configuration (3) instead
 return a failed result; the service leaves its committed document/version
 unchanged. The client must correct limits/configuration and resynchronize rather
 than assuming that a refused delta advanced the server mirror.
+
+`dslshlevel.project()` exposes that same synchronous renderer for already
+observed token/comment streams, using a sealed live profile and one exact source
+position index. A root of zero emits only the flat lexical file tree. The
+Classic adapter selects `llclanguage.prepared()` once, seals explicit category
+mappings and obtains one bounded `llcparse.parsed` observation per source
+snapshot. Classic preparation remains the sole owner of contextual keywords,
+source options, continuation filtering, Unicode and comment policy. Authored
+continuation commas remain visible in observations. Failed input retains
+lexical/comment/unknown coverage with its original offset/error, without
+requesting or presenting a partial AST. Active SRCMAP is refused before
+projection because edited-buffer ranges must still name original bytes.
 
 ## Reuse, limits and qualification boundary
 

@@ -1,6 +1,8 @@
 /* MIT licence. Independent Level L projection, identity and damage controls. */
 options levelb
 import rxfnsb
+import llcore
+import llcomments
 import dslsh_fixture
 import dslshmodel
 import dslshlevel
@@ -34,6 +36,13 @@ main: procedure = .int expose checks failures
   duplicate = .dslshlevel..profile()
   accepted = duplicate.token('identifier',35)
   call check(accepted = 1 & duplicate.token('identifier',35) = 0 & pos('duplicate token',duplicate.error()) > 0, 'duplicate mapping refuses profile')
+
+  empty = '' as .binary
+  empty_tokens = .llcore..stream.tokens(empty); empty_trivia = .llcomments..regions()
+  empty_tree = .llcore..tree; empty_positions = .dslshmodel..positions(reference empty)
+  empty_checks = .dslshlevel..validation(0); unsealed = .dslshlevel..profile()
+  refused = dslshlevel..project(reference empty,reference empty_tokens,reference empty_trivia,reference empty_tree,0,reference unsealed,reference empty_positions,reference empty_checks)
+  call check(refused.status() <> 0 & pos('PROFILE',refused.error()) > 0, 'shared projection refuses an unsealed profile')
 
   callback = .notice()
   parser = .dslshlevel..adapter(reference definition,mapping,callback)

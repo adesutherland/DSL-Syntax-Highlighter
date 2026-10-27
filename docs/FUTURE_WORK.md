@@ -39,6 +39,7 @@ the selected profile/validator, not the generic protocol or SDK.
 | **BL-AC04** | Clean and damaged inputs retain ordered source coverage, correct Unicode/CRLF/end-of-input positions and deterministic diagnostic display. Malformed ingress and resource refusal have explicit safe outcomes. | done; selected native profile |
 | **BL-AC05** | Source and representative RXAS review show reused frozen definitions, bounded work/storage and no per-token whole-definition/tree snapshots. Selected normal integration checks pass on one VM; unverified platform/browser limits are explicit. | done; selected native profile |
 | **BL-AC06** | Both editor and parser sides of the B library, including synchronization and emergency highlighting, meet their independently agreed compatibility checks. | open; later increment |
+| **BL-AC07** | A host-built Classic Rexx example reuses the maintained `levelc.rxl` parser, projects complete lexical/unknown coverage and located diagnostics through the existing B protocol, and never executes edited source. The parser-only image has an audited module closure and runs with autoload disabled. Active SRCMAP is refused until exact original-byte projection is available. | done; host-built example increment |
 
 ### Steps
 
@@ -48,6 +49,7 @@ the selected profile/validator, not the generic protocol or SDK.
 | **BL-STEP02** | Implement the B parser protocol/session component and L mapping/validation adapter against that reviewed interface; AC02–04. | done |
 | **BL-STEP03** | Add opt-in build/install, maintained small examples and focused independent/C interoperability checks. Review first representative RXAS early, batch repairs, then freeze; AC01–05. | done |
 | **BL-STEP04** | Complete selected checks, enduring documentation and local delivery. Keep full-library, complete PHP/cREXX coverage and browser/WASM qualification separate; AC01–06. | done; parser-side local increment |
+| **BL-STEP05** | Reuse the reviewed Classic observation/projection seam, add one optional endpoint and representative source, then run focused component and framed-STDIO checks for clean, malformed, Unicode and repeated-document requests; AC07. | done |
 
 The initial endpoint uses synchronous STDIO and exposes a transport-independent
 request service for later in-process/browser hosts. Socket transport, concurrent

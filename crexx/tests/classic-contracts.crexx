@@ -1,0 +1,116 @@
+/* MIT licence. Independent Classic observation/projection contracts. */
+options levelb
+import rxfnsb
+import dslshmodel
+import dslshclassic
+
+main: procedure = .int expose checks failures
+  checks = 0; failures = 0
+  parser = .dslshclassic..adapter()
+  context = .dslshmodel..request('classic.test',0,1,'',0)
+  source = ('options levelc' || '0a'x || 'say = 1' || '0a'x || 'say say' || '0a'x) as .binary
+  result = parser.parse(reference source,reference context)
+  call check(result.status() = 0, 'clean Classic source admitted')
+  call check(hasleaf(result,54,15,3) & hasleaf(result,41,23,3) & hasleaf(result,54,27,3), 'contextual SAY distinguishes assignment and instruction operands')
+  call check(containers(result) = 1 & diagnostics(result) = 0, 'clean result has one flat file root and no claimed source AST')
+
+  source = ("say 'a'," || '0a'x || "'b'" || '0a'x) as .binary
+  result = parser.parse(reference source,reference context)
+  call check(result.status() = 0 & hasleaf(result,46,7,1), 'authored continuation comma remains visible after parser layout filtering')
+
+  source = ('say' || '0b0c'x || "'ok'" || '0a'x) as .binary
+  result = parser.parse(reference source,reference context)
+  call check(result.status() = 0 & hasleaf(result,33,3,2) & diagnostics(result) = 0, 'Classic VT and FF source gaps remain whitespace')
+
+  source = ('/* λ */' || '0d0a'x || "say '😀'" || '0d0a'x) as .binary
+  result = parser.parse(reference source,reference context)
+  call check(result.status() = 0 & hasleaf(result,38,0,7) & hasleaf(result,39,13,3), 'Unicode comment and string preserve codepoint spans across CRLF')
+  call check(rootextent(result) = 18, 'Unicode root uses codepoints rather than UTF-8 bytes')
+
+  source = ("say 'λ'" || '0a'x || '[') as .binary
+  result = parser.parse(reference source,reference context)
+  call check(result.status() = 0 & rootextent(result) = 9 & haserror(result,8,1), 'invalid byte retains complete coverage and exact original diagnostic')
+  call check(hasleaf(result,36,8,1) & hasleaf(result,39,4,3), 'lexical prefix survives without treating damaged tail as valid syntax')
+
+  source = ('say 1' || '0a'x || '/* λ') as .binary
+  result = parser.parse(reference source,reference context)
+  call check(result.status() = 0 & rootextent(result) = 10 & totaltype(result,38) = 4 & diagnostics(result) > 0, 'unfinished outer comment remains observed through EOF')
+
+  source = "say 'λ" as .binary
+  result = parser.parse(reference source,reference context)
+  call check(result.status() = 0 & rootextent(result) = 6 & haserror(result,4,1) & totaltype(result,39) = 0, 'unfinished quote is located without a fabricated string token')
+
+  source = ('if 1 then' || '0a'x) as .binary
+  result = parser.parse(reference source,reference context)
+  call check(result.status() = 0 & diagnostics(result) > 0 & containers(result) = 1, 'incomplete syntax emits lexical output and diagnostics without a recovered AST')
+
+  source = ('options levelc srcmap' || '0a'x || "say 'x'" || '0a'x) as .binary
+  result = parser.parse(reference source,reference context)
+  call check(result.status() <> 0 & pos('SRCMAP',result.error()) > 0, 'active SRCMAP refuses unproven original-byte projection')
+
+  source = '61ff'x as .binary
+  result = parser.parse(reference source,reference context)
+  call check(result.status() <> 0, 'invalid UTF-8 is a source admission refusal')
+
+  source = ("say 'ok'" || '0a'x) as .binary
+  result = parser.parse(reference source,reference context)
+  call check(result.status() = 0 & diagnostics(result) = 0 & hasleaf(result,41,0,3) & hasleaf(result,39,4,4), 'same adapter returns clean observations after failed requests')
+
+  tiny = .dslshclassic..adapter(20000000,2)
+  result = tiny.parse(reference source,reference context)
+  call check(result.status() <> 0 & pos('LIMIT',result.error()) > 0, 'observation/result limit refuses without partial success')
+  say 'DSLSH_CLASSIC|checks=' || checks || '|failures=' || failures
+  return failures
+
+check: procedure = .void expose checks failures
+  arg condition = .int, label = .string
+  checks = checks + 1
+  if condition then return
+  failures = failures + 1
+  say 'FAIL|' || label
+  return
+
+hasleaf: procedure = .int
+  arg result = .dslshmodel..result, kind = .int, first = .int, count = .int
+  do i = 1 to result.count()
+    if result.type(i) = kind & result.pos(i) = first & result.length(i) = count then return 1
+  end
+  return 0
+
+haserror: procedure = .int
+  arg result = .dslshmodel..result, first = .int, count = .int
+  do i = 1 to result.count()
+    if result.code(i) == 'CLASSIC_INPUT' & result.severity(i) = 3 & result.pos(i) = first & result.length(i) = count then return 1
+  end
+  return 0
+
+diagnostics: procedure = .int
+  arg result = .dslshmodel..result
+  count = 0
+  do i = 1 to result.count()
+    if result.code(i) <> '' then count = count + 1
+  end
+  return count
+
+containers: procedure = .int
+  arg result = .dslshmodel..result
+  count = 0
+  do i = 1 to result.count()
+    if result.type(i) >= 70 & result.type(i) < 100 then count = count + 1
+  end
+  return count
+
+rootextent: procedure = .int
+  arg result = .dslshmodel..result
+  do i = 1 to result.count()
+    if result.type(i) = 71 then return result.length(i)
+  end
+  return -1
+
+totaltype: procedure = .int
+  arg result = .dslshmodel..result, kind = .int
+  count = 0
+  do i = 1 to result.count()
+    if result.type(i) = kind then count = count + result.length(i)
+  end
+  return count

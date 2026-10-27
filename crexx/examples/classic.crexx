@@ -1,0 +1,16 @@
+/* MIT licence. Parser-only Classic Rexx framed-STDIO endpoint. */
+options levelb
+import dslshmodel
+import dslshclassic
+import dslshsession
+import dslshstdio
+
+main: procedure = .int
+  arg argv = .string[]
+  do i = 1 to argv[0]
+    if argv[i] <> '-d' & argv[i] <> '--syntaxhighlight' & argv[i] <> '--stdio' then return 2
+  end
+  backend = .dslshclassic..adapter()
+  policy = .dslshmodel..limits()
+  server = .dslshsession..service(backend,policy)
+  return dslshstdio..run(reference server)

@@ -1,0 +1,96 @@
+/* MIT licence. Observe the maintained Classic parser; never execute source. */
+options levelb
+namespace dslshclassic expose adapter
+import rxfnsb
+import llcore
+import llclanguage
+import llcparse
+import dslshmodel
+import dslshlevel
+
+/** One prepared Classic definition and sealed category map per adapter.
+ * The maintained llcparse preparation owns contextual words, source options,
+ * continuations, Unicode and comment recognition. This adapter owns no lexer.
+ */
+adapter: class implements .dslshmodel..parser
+  _profile = .dslshlevel..profile
+  _work = .int
+  _entries = .int
+  _error = .string
+  *: factory
+    arg work = 20000000, entries = 200000
+    _work = work; _entries = entries; _error = ''
+    if work < 1 | entries < 1 then do
+      _error = 'DSLSH_LIMIT: invalid Classic projection budget'; return
+    end
+    language_ref = llclanguage..prepared()
+    if <refvalid>(language_ref) = 0 then do
+      _error = 'DSLSH_CLASSIC: unavailable prepared language'; return
+    end
+    mapping = .dslshlevel..profile()
+    ok = .int; i = .int
+    ok = mapping.token('identifier',54); ok = mapping.token('docontrol',54)
+    ok = mapping.token('number',40); ok = mapping.token('string',39)
+    ok = mapping.token('addressquoted',39); ok = mapping.token('typename',55)
+    ok = mapping.token('constantname',57); ok = mapping.token('traceoption',57)
+    names = 'labelname signalname callname'
+    do i = 1 to words(names)
+      ok = mapping.token(word(names,i),56)
+    end
+    names = 'addressenv addressresource'
+    do i = 1 to words(names)
+      ok = mapping.token(word(names,i),54)
+    end
+    ok = mapping.token('separator',47); ok = mapping.token('assign',43)
+    names = 'open close comma colon parsedot'
+    do i = 1 to words(names)
+      ok = mapping.token(word(names,i),46)
+    end
+    names = 'plus minus times divide power integerdivide remainder'
+    do i = 1 to words(names)
+      ok = mapping.token(word(names,i),44)
+    end
+    names = 'lt gt le ge ne strict strictne strictlt strictgt strictle strictge and or xor not'
+    do i = 1 to words(names)
+      ok = mapping.token(word(names,i),45)
+    end
+    names = 'concat blank abut'
+    do i = 1 to words(names)
+      ok = mapping.token(word(names,i),42)
+    end
+    names = 'ifword thenword elseword doword endword whileword leaveword iterateword returnword exitword sayword callword nopword optionsword importword procedureword argword numericword digitsword fuzzword formword scientificword engineeringword asword dropword selectword whenword otherwiseword foreverword untilword toword byword forword parseword parseupper parsekind parsevalue parsevar parsewith exposeword pullword pushword queueword addressword addressvalue addresswith addressoption addressposition addresskind commandword numericvalue signalword signalvalue signalon signaloff signalcondition signalhandlername traceword tracevalue callon calloff callcondition callhandlername interpretword'
+    do i = 1 to words(names)
+      ok = mapping.token(word(names,i),41)
+    end
+    if mapping.finish(language_ref) = 0 then do
+      _error = mapping.error(); return
+    end
+    _profile = mapping
+    return
+  parse: method = .dslshmodel..result
+    arg source = reference .binary, context = reference .dslshmodel..request
+    out = .dslshmodel..result(_entries)
+    ok = .int
+    if _error <> '' then do; ok = out.fail(_error); return out; end
+    bytes = dereference source; identity = dereference context
+    local_positions = .dslshmodel..positions
+    positions_ref = reference .dslshmodel..positions
+    if identity.haspositions() then positions_ref = identity.positions()
+    else do
+      local_positions = .dslshmodel..positions(source,2097152,_work)
+      positions_ref = reference local_positions
+    end
+    positions = dereference positions_ref
+    if positions.status() <> 0 then do; ok = out.fail(positions.error()); return out; end
+    parsed = .llcparse..parsed(bytes,2097152,identity.docid(),'program',_entries)
+    status = parsed.status()
+    if status = 2 | status = 3 then do; ok = out.fail(parsed.error()); return out; end
+    if parsed.mapped() then do
+      ok = out.fail('DSLSH_CLASSIC_SRCMAP: original-byte projection is unavailable'); return out
+    end
+    tokens = parsed.observedtokens(); trivia = parsed.observedtrivia()
+    checks = .dslshlevel..validation(positions.bytes())
+    if status <> 0 then ok = checks.diagnostic(parsed.offset(),parsed.offset(),3,'CLASSIC_INPUT',parsed.error())
+    /* Syntax failure retains useful observations, never an admitted partial AST. */
+    tree = .llcore..tree
+    return dslshlevel..project(source,reference tokens,reference trivia,reference tree,0,reference _profile,positions_ref,reference checks,_work,_entries)

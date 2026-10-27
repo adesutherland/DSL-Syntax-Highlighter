@@ -1,6 +1,6 @@
 /* MIT licence. Grammar-driven DSLSH projection; no session or transport state. */
 options levelb
-namespace dslshlevel expose profile validation validator adapter
+namespace dslshlevel expose profile validation validator adapter project
 import rxfnsb
 import dslshmodel
 import llcore
@@ -113,6 +113,8 @@ profile: class
     return 0
   hasparser: method = .int
     return _parser
+  ready: method = .int
+    return _ready & <refvalid>(_owner)
   error: method = .string
     return _error
 
@@ -265,9 +267,31 @@ adapter: class implements .dslshmodel..parser
       call _validator.check(source,reference tokens,reference tree,root,reference checks)
     end
     if checks.error() <> '' then do; ok = out.fail(checks.error()); return out; end
-    renderer = .render(source,reference tokens,reference trivia,reference tree,root,reference _profile,positions_ref,reference checks,reference out,_work,_entries)
-    ok = renderer.run()
-    return out
+    return project(source,reference tokens,reference trivia,reference tree,root,reference _profile,positions_ref,reference checks,_work,_entries)
+
+/** Project one synchronous borrowed observation through the shared renderer.
+ * Root zero deliberately emits lexical/comment/unknown coverage only; callers
+ * must not pass a failed or partial recognition arena as a successful tree.
+ * All byte ranges must refer to this exact original UTF-8 source snapshot.
+ */
+project: procedure = .dslshmodel..result
+  arg source = reference .binary, tokens = reference .llcore..stream, trivia = reference .llcomments..regions, tree = reference .llcore..tree, root = .int, mapping = reference .profile, positions = reference .dslshmodel..positions, checks = reference .validation, work = 20000000, entries = 200000
+  out = .dslshmodel..result(entries)
+  index = dereference positions; validation = dereference checks; bytes = dereference source
+  profile = dereference mapping
+  ok = .int
+  if work < 1 | entries < 1 | root < 0 then do
+    ok = out.fail('DSLSH_LIMIT: invalid projection budget/root'); return out
+  end
+  if index.status() <> 0 then do; ok = out.fail(index.error()); return out; end
+  if profile.ready() = 0 then do; ok = out.fail('DSLSH_PROFILE: projection requires a sealed live profile'); return out; end
+  if index.bytes() <> <blen>(bytes) then do
+    ok = out.fail('DSLSH_RANGE: projection source/index mismatch'); return out
+  end
+  if validation.error() <> '' then do; ok = out.fail(validation.error()); return out; end
+  renderer = .render(source,tokens,trivia,tree,root,mapping,positions,checks,reference out,work,entries)
+  ok = renderer.run()
+  return out
 
 /* Call-local renderer. Every reference points to an owner anchored by parse(). */
 render: class
@@ -411,7 +435,7 @@ render: class
         if kind = 36 then do
           /* Only actual ASCII layout is whitespace; other unclaimed text is unknown. */
           byte = <at..u8>(at) source
-          white = byte = 9 | byte = 10 | byte = 13 | byte = 32
+          white = byte = 9 | byte = 10 | byte = 11 | byte = 12 | byte = 13 | byte = 32
           if white then kind = 33
           point = positions.point(at)
           if point < 0 then do; _error = 'DSLSH_RANGE: nonboundary gap'; return 0; end
@@ -420,7 +444,7 @@ render: class
             _fuel = _fuel - 1
             if _fuel < 0 then do; _error = 'DSLSH_LIMIT: projection work'; return 0; end
             byte = <at..u8>(next) source
-            if (byte = 9 | byte = 10 | byte = 13 | byte = 32) <> white then leave
+            if (byte = 9 | byte = 10 | byte = 11 | byte = 12 | byte = 13 | byte = 32) <> white then leave
             point = point + 1; next = positions.byte(point + 1)
           end
           last = min(last,next)

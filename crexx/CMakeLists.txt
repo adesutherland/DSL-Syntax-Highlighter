@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.24)
 # Existing native host tools only. This project never fetches or builds CREXX.
 set(CREXX_BIN_DIR "" CACHE PATH "Existing CREXX tools and matching Level B/L bytecode")
 set(CREXX_SOURCE_DIR "" CACHE PATH "Optional CREXX source checkout owning the PHP example grammar")
+set(CREXX_CLASSIC_BUILD_DIR "" CACHE PATH "Optional prepared CREXX research build owning the Classic parser artifacts")
 if(CREXX_BIN_DIR STREQUAL "")
   message(FATAL_ERROR "DSLSH_BUILD_CREXX requires explicit CREXX_BIN_DIR")
 endif()
@@ -136,6 +137,49 @@ if(NOT CREXX_SOURCE_DIR STREQUAL "")
   set(_dslsh_php_image "${_dslsh_programs}/dslsh-php.rxbin")
   list(APPEND _dslsh_example_images "${_dslsh_php_image}")
 endif()
+
+# This optional example consumes only existing parser artifacts. Never recurse
+# into the CREXX build or replace the maintained levelc.rxl grammar here.
+set(_dslsh_classic_image "")
+set(_dslsh_classic_modules)
+set(_dslsh_classic_files)
+if(NOT CREXX_CLASSIC_BUILD_DIR STREQUAL "")
+  get_filename_component(CREXX_CLASSIC_BUILD_DIR "${CREXX_CLASSIC_BUILD_DIR}" ABSOLUTE)
+  foreach(image IN ITEMS library rxfnsl)
+    set(prepared "${CREXX_CLASSIC_BUILD_DIR}/bin/${image}.rxbin")
+    if(NOT EXISTS "${prepared}" OR IS_DIRECTORY "${prepared}")
+      message(FATAL_ERROR "Missing matching Classic SDK image: ${prepared}")
+    endif()
+    file(SHA256 "${prepared}" prepared_hash)
+    file(SHA256 "${CREXX_BIN_DIR}/${image}.rxbin" selected_hash)
+    if(NOT prepared_hash STREQUAL selected_hash)
+      message(FATAL_ERROR "CREXX_BIN_DIR ${image}.rxbin does not match CREXX_CLASSIC_BUILD_DIR")
+    endif()
+  endforeach()
+  set(_dslsh_classic_inputs
+    "${CREXX_CLASSIC_BUILD_DIR}/research/level-l/compilers/frontends/llcgrammar.rxbin"
+    "${CREXX_CLASSIC_BUILD_DIR}/research/level-l/compilers/levelc/opt/llclanguage.rxbin"
+    "${CREXX_CLASSIC_BUILD_DIR}/research/level-l/compilers/levelc/opt/llcsrcmap.rxbin"
+    "${CREXX_CLASSIC_BUILD_DIR}/research/level-l/compilers/levelc/opt/llcparse.rxbin"
+    "${CREXX_CLASSIC_BUILD_DIR}/lib/rxfnsc/members/RexxClassicUnicodeProperties/RexxClassicUnicodeProperties.rxbin")
+  foreach(input IN LISTS _dslsh_classic_inputs)
+    if(NOT EXISTS "${input}" OR IS_DIRECTORY "${input}")
+      message(FATAL_ERROR "Missing prepared Classic parser artifact: ${input}; prepare it in CREXX first")
+    endif()
+    get_filename_component(module "${input}" NAME_WE)
+    list(APPEND _dslsh_classic_modules "${module}")
+    list(APPEND _dslsh_classic_files "${_dslsh_modules}/${module}.rxbin")
+    add_custom_command(OUTPUT "${_dslsh_modules}/${module}.rxbin"
+      COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${input}" "${_dslsh_modules}/${module}.rxbin"
+      DEPENDS "${input}" VERBATIM)
+  endforeach()
+  dslsh_crexx_module(dslshclassic "${CMAKE_CURRENT_SOURCE_DIR}/lib/dslshclassic.crexx"
+    TRUE dslshmodel dslshlevel ${_dslsh_classic_modules})
+  dslsh_crexx_program(dslsh-classic "${CMAKE_CURRENT_SOURCE_DIR}/examples/classic.crexx"
+    TRUE ${_dslsh_core} dslshlevel dslshclassic ${_dslsh_classic_modules})
+  set(_dslsh_classic_image "${_dslsh_programs}/dslsh-classic.rxbin")
+  list(APPEND _dslsh_example_images "${_dslsh_classic_image}")
+endif()
 add_custom_target(dslsh_crexx_examples ALL DEPENDS ${_dslsh_example_images})
 
 if(DSLSH_BUILD_TESTS)
@@ -156,6 +200,11 @@ if(DSLSH_BUILD_TESTS)
     "${_dslsh_programs}/session-contracts.rxbin"
     "${_dslsh_programs}/stdio-echo.rxbin"
     "${_dslsh_programs}/adapter-contracts.rxbin")
+  if(NOT _dslsh_classic_image STREQUAL "")
+    dslsh_crexx_program(classic-contracts "${CMAKE_CURRENT_SOURCE_DIR}/tests/classic-contracts.crexx"
+      TRUE dslshmodel dslshlevel dslshclassic ${_dslsh_classic_modules})
+    add_dependencies(dslsh_crexx_contracts dslsh_crexx_classic-contracts)
+  endif()
   if(BUILD_TESTING)
     foreach(fixture IN ITEMS model wire session)
       string(TOUPPER "${fixture}" marker)
@@ -172,6 +221,22 @@ if(DSLSH_BUILD_TESTS)
     set_tests_properties(crexx_adapter_contracts PROPERTIES TIMEOUT 120
       PASS_REGULAR_EXPRESSION "DSLSH_ADAPTER[|]checks=[0-9]+[|]failures=0"
       FAIL_REGULAR_EXPRESSION "FAIL[|]|PANIC:" LABELS "crexx;parser")
+    if(NOT _dslsh_classic_image STREQUAL "")
+      add_test(NAME crexx_classic_contracts
+        COMMAND "${_dslsh_rxbvm}" --no-autoload
+          "${_dslsh_programs}/classic-contracts.rxbin" -a)
+      set_tests_properties(crexx_classic_contracts PROPERTIES TIMEOUT 120
+        PASS_REGULAR_EXPRESSION "DSLSH_CLASSIC[|]checks=[0-9]+[|]failures=0"
+        FAIL_REGULAR_EXPRESSION "FAIL[|]|PANIC:" LABELS "crexx;parser;classic")
+      add_test(NAME crexx_classic_stdio
+        COMMAND "${CMAKE_COMMAND}" "-DVM=${_dslsh_rxbvm}"
+          "-DIMAGE=${_dslsh_classic_image}"
+          "-DSAMPLE=${CMAKE_CURRENT_SOURCE_DIR}/examples/classic.rexx"
+          "-DWORK_ROOT=${CMAKE_CURRENT_BINARY_DIR}/test-work/classic"
+          -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/check-classic.cmake")
+      set_tests_properties(crexx_classic_stdio PROPERTIES TIMEOUT 120
+        PASS_REGULAR_EXPRESSION "DSLSH_CLASSIC_STDIO[|].*[|]failures=0" LABELS "crexx;parser;classic")
+    endif()
     set(DSLSH_CREXX_PARSER_TESTER "" CACHE FILEPATH "Optional prepared C parser_tester for B/C interoperability")
     set(_dslsh_c_consumer)
     if(TARGET parser_tester)
@@ -208,6 +273,10 @@ if(DSLSH_INSTALL)
   install(FILES ${_dslsh_core_files} "${_dslsh_modules}/dslshlevel.rxbin"
     DESTINATION share/dslsyntax/crexx/lib)
   install(FILES ${_dslsh_example_images} DESTINATION bin)
+  if(NOT _dslsh_classic_image STREQUAL "")
+    install(FILES "${_dslsh_modules}/dslshclassic.rxbin" ${_dslsh_classic_files}
+      DESTINATION share/dslsyntax/crexx/lib)
+  endif()
   install(DIRECTORY lib/ DESTINATION share/dslsyntax/crexx/lib
     FILES_MATCHING PATTERN "*.crexx")
   install(FILES README.md DESTINATION share/dslsyntax/crexx)
@@ -215,5 +284,5 @@ if(DSLSH_INSTALL)
     "${CMAKE_CURRENT_SOURCE_DIR}/../docs/FUTURE_WORK.md"
     DESTINATION share/dslsyntax/docs)
   install(DIRECTORY examples/ DESTINATION share/dslsyntax/crexx/examples
-    FILES_MATCHING PATTERN "*.crexx" PATTERN "*.levell")
+    FILES_MATCHING PATTERN "*.crexx" PATTERN "*.levell" PATTERN "*.rexx")
 endif()
